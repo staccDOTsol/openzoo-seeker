@@ -1,6 +1,10 @@
-<img width="400" alt="CordovaSeeker" src="https://storage.proofnetwork.lol/cordova_seeker_true_transparent.png" />
+<img width="400" height="400" alt="CordovaSeeker" src="https://storage.proofnetwork.lol/cordova_seeker_true_transparent.png" />
 
 # CordovaSeeker — open-source Seeker game template
+
+> **Disclaimer:** This is an independent community project. It is **not** affiliated with,
+> endorsed by, or officially related to Solana Mobile, the Solana Seeker, or the Solana
+> Foundation in any way. "Seeker" is referenced only to describe device compatibility.
 
 Build games for the [Solana Seeker](https://solanamobile.com/) phone with **plain web tech** —
 no Unity, no React Native, no official Solana Mobile SDK wrappers. Just:
