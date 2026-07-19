@@ -1,4 +1,4 @@
-![CordovaSeeker](https://storage.proofnetwork.lol/cordova_seeker_true_transparent.png)
+<img width="400" alt="CordovaSeeker" src="https://storage.proofnetwork.lol/cordova_seeker_true_transparent.png" />
 
 # CordovaSeeker — open-source Seeker game template
 
