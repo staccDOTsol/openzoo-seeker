@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="dark">
   <meta http-equiv="Content-Security-Policy"
     content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://esm.sh; connect-src * https: wss: ws:; img-src * data:; style-src 'self' 'unsafe-inline'; frame-src 'self'; media-src 'self';">
-  <title>Seeker Clicker</title>
+  <title>CordovaSeeker</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: 100%; background: #000; }
@@ -93,7 +93,7 @@
 </head>
 <body>
   <div class="logo" data-component="logo">&#9889;</div>
-  <div class="title" data-component="title">SEEKER CLICKER</div>
+  <div class="title" data-component="title">CORDOVASEEKER</div>
   <div class="divider" data-component="divider"></div>
 
   <div id="picker" data-component="wallet-picker">
@@ -271,7 +271,7 @@
   /* ═══════════════════════════════════════════════
      Deep-link handler (global — called by plugin)
      cordova-plugin-customurlscheme fires this when
-     seekerclicker://… URL arrives. It retries until this
+     cordovaseeker://… URL arrives. It retries until this
      function exists, so defining it early is safe.
      ═══════════════════════════════════════════════ */
   window.handleOpenURL = function(url) {
@@ -368,7 +368,7 @@
      Phantom / Solflare encrypted connect protocol.
      We generate an x25519 keypair, open the wallet
      deep-link URL, and wait for the redirect back
-     to seekerclicker://callback with encrypted payload.
+     to cordovaseeker://callback with encrypted payload.
      ═══════════════════════════════════════════════ */
   function connectDeepLink(wallet) {
     if (!window.nacl) {
@@ -391,7 +391,7 @@
     var params = new URLSearchParams({
       app_url:                   'https://example.com',
       dapp_encryption_public_key: pubKeyB58,
-      redirect_link:             'seekerclicker://callback',
+      redirect_link:             'cordovaseeker://callback',
       cluster:                   'mainnet-beta'
     });
 

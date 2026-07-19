@@ -1,4 +1,4 @@
-package com.example.seekerclicker;
+package com.example.cordovaseeker;
 
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
@@ -26,7 +26,7 @@ public class MWAPlugin extends CordovaPlugin {
     // Dapp identity shown in the wallet's approval dialog — customize for your game
     private static final String IDENTITY_URI  = "https://example.com";
     private static final String IDENTITY_ICON = "icons/icon-192.png";
-    private static final String IDENTITY_NAME = "Seeker Clicker";
+    private static final String IDENTITY_NAME = "CordovaSeeker";
     private static final String CHAIN         = "solana:mainnet";
     private static final int SCENARIO_TIMEOUT_MS = 90000;
     private static final String B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";

@@ -1,6 +1,6 @@
 {
-  "name": "com.example.seekerclicker",
-  "displayName": "Seeker Clicker",
+  "name": "com.example.cordovaseeker",
+  "displayName": "CordovaSeeker",
   "version": "1.0.0",
   "description": "Open-source template for building Solana Seeker games with plain web tech — Cordova shell + native Mobile Wallet Adapter plugin, no Unity required",
   "main": "index.js",
@@ -29,7 +29,7 @@
     ],
     "plugins": {
       "cordova-plugin-customurlscheme": {
-        "URL_SCHEME": "seekerclicker",
+        "URL_SCHEME": "cordovaseeker",
         "ANDROID_SCHEME": " ",
         "ANDROID_HOST": " ",
         "ANDROID_PATHPREFIX": "/"

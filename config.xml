@@ -1,8 +1,8 @@
 <?xml version='1.0' encoding='utf-8'?>
-<widget id="com.example.seekerclicker" version="1.0.0" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0">
-    <name>Seeker Clicker</name>
+<widget id="com.example.cordovaseeker" version="1.0.0" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0">
+    <name>CordovaSeeker</name>
     <description>Open-source Seeker game template — Cordova + native Mobile Wallet Adapter, no Unity required</description>
-    <author href="https://github.com/your-org/seeker-clicker">
+    <author href="https://github.com/your-org/cordovaseeker">
         Your Name
     </author>
 

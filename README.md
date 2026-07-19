@@ -1,4 +1,4 @@
-# Seeker Clicker — open-source Seeker game template
+# CordovaSeeker — open-source Seeker game template
 
 Build games for the [Solana Seeker](https://solanamobile.com/) phone with **plain web tech** —
 no Unity, no React Native, no official Solana Mobile SDK wrappers. Just:
