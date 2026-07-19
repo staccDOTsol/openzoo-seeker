@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://storage.proofnetwork.lol/cordova_seeker_true_transparent.png" alt="CordovaSeeker" width="400">
+</p>
+
 # CordovaSeeker — open-source Seeker game template
 
 Build games for the [Solana Seeker](https://solanamobile.com/) phone with **plain web tech** —
