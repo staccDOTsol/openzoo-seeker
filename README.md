@@ -7,8 +7,8 @@ no Unity, no React Native, no official Solana Mobile SDK wrappers. Just:
 - **`cordova-plugin-mwa`** (included, ~300 lines of Java) — a minimal native
   [Mobile Wallet Adapter](https://docs.solanamobile.com/getting-started/overview) client:
   `authorize`, `signMessage`, `signTransaction`, `signAndSendTransaction`
-- A **wallet shell** (`www/index.html`) that handles connecting, then runs your game in an
-  iframe and talks to it over `postMessage`
+- A **wallet shell** (`www/index.html`) that handles MWA connect + message signing, then
+  runs your game in an iframe and talks to it over `postMessage`
 - A demo **clicker game** (`www/game/`) that works fully offline
 
 ## How it works
@@ -17,8 +17,6 @@ no Unity, no React Native, no official Solana Mobile SDK wrappers. Just:
 ┌─────────────────────────────────┐
 │ www/index.html  (wallet shell)  │
 │  • MWA native connect (Seeker)  │
-│  • Phantom/Solflare deep links  │
-│  • local burner wallet          │
 │  ┌───────────────────────────┐  │
 │  │ iframe: www/game/         │  │
 │  │  your game — receives     │  │
@@ -62,10 +60,10 @@ Requirements: Android SDK + JDK 17 (`cordova requirements android` to verify).
 
 ## Make it yours
 
-- `package.json` + `config.xml` — app id, name, `URL_SCHEME` (deep-link callback scheme)
+- `package.json` + `config.xml` — app id, name
 - `cordova-plugin-mwa/src/android/MWAPlugin.java` — `IDENTITY_URI` / `IDENTITY_NAME`
   constants shown in the wallet approval dialog (and the Java package if you rename the app id)
-- `www/index.html` — branding, and the deep-link `app_url` / `redirect_link`
+- `www/index.html` — branding
 - `www/game/` — replace the clicker with your game
 - `res/icon/android/` — app icons
 

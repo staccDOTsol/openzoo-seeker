@@ -13,10 +13,6 @@
     <allow-navigation href="https://yourgame.example.com/*" />
     <access origin="https://yourgame.example.com" /> -->
 
-    <!-- CDN for tweetnacl (deep-link encryption) -->
-    <access origin="https://unpkg.com" />
-    <access origin="https://esm.sh" />
-
     <!-- Open wallet / external links in system browser -->
     <allow-intent href="https://*/*" />
     <!-- MWA uses solana-wallet:// scheme to discover & connect native wallet apps -->
@@ -47,7 +43,7 @@
         <preference name="MediaPlaybackRequiresUserAction" value="false" />
         <!-- Use hardware back button to quit (no history to navigate) -->
         <preference name="OverrideBackButton" value="true" />
-        <!-- singleTask: deep links reuse existing activity instead of recreating (prevents page reload) -->
+        <!-- singleTask: relaunches (e.g. returning from the wallet app) reuse the existing activity instead of recreating it -->
         <preference name="AndroidLaunchMode" value="singleTask" />
 
         <!-- Icons -->

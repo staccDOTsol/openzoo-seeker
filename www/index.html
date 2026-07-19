@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://esm.sh; connect-src * https: wss: ws:; img-src * data:; style-src 'self' 'unsafe-inline'; frame-src 'self'; media-src 'self';">
+    content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src * https: wss: ws:; img-src * data:; style-src 'self' 'unsafe-inline'; frame-src 'self'; media-src 'self';">
   <title>CordovaSeeker</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -122,68 +122,14 @@
 
   <!-- Cordova bridge — only exists when served from local www/ -->
   <script src="cordova.js"></script>
-  <!-- TweetNaCl for x25519 deep-link encryption + Ed25519 burner keypairs -->
-  <script src="https://unpkg.com/tweetnacl@1.0.3/nacl-fast.min.js"></script>
   <script>
   'use strict';
 
   /* ═══════════════════════════════════════════════
-     Base58 encode / decode
-     ═══════════════════════════════════════════════ */
-  var B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-  var B58MAP = {};
-  for (var i = 0; i < B58.length; i++) B58MAP[B58[i]] = i;
-
-  function bs58encode(bytes) {
-    var zeros = 0;
-    while (zeros < bytes.length && bytes[zeros] === 0) zeros++;
-    var b = new Uint8Array(bytes); // copy — we mutate during division
-    var out = [];
-    var start = zeros;
-    while (start < b.length) {
-      var carry = 0;
-      for (var i = start; i < b.length; i++) {
-        carry = carry * 256 + b[i];
-        b[i] = (carry / 58) | 0;
-        carry %= 58;
-      }
-      out.push(B58[carry]);
-      while (start < b.length && b[start] === 0) start++;
-    }
-    for (var i = 0; i < zeros; i++) out.push('1');
-    return out.reverse().join('');
-  }
-
-  function bs58decode(str) {
-    var zeros = 0;
-    while (zeros < str.length && str[zeros] === '1') zeros++;
-    var b = new Uint8Array(str.length);
-    var len = 0;
-    for (var i = zeros; i < str.length; i++) {
-      var carry = B58MAP[str[i]];
-      if (carry === undefined) throw new Error('Bad base58: ' + str[i]);
-      for (var j = 0; j < len; j++) {
-        carry += b[j] * 58;
-        b[j] = carry & 0xff;
-        carry >>= 8;
-      }
-      while (carry > 0) {
-        b[len++] = carry & 0xff;
-        carry >>= 8;
-      }
-    }
-    var result = new Uint8Array(zeros + len);
-    for (var i = 0; i < len; i++) result[zeros + i] = b[len - 1 - i];
-    return result;
-  }
-
-  /* ═══════════════════════════════════════════════
      State
      ═══════════════════════════════════════════════ */
-  var dappKeypair      = null;   // x25519 for deep-link NaCl encryption
-  var pendingWallet    = null;   // 'phantom' | 'solflare' while awaiting redirect
   var connectedAddress = null;   // wallet address after connect
-  var connectedMethod  = null;   // 'MWA' | 'phantom' | 'solflare' | 'burner'
+  var connectedMethod  = null;   // 'MWA'
   // Local game bundled in www/game/. Swap for an https:// URL to load a
   // remotely-hosted game instead (also update CSP frame-src + allow-navigation).
   var GAME_URL    = 'game/index.html';
@@ -269,75 +215,7 @@
   }
 
   /* ═══════════════════════════════════════════════
-     Deep-link handler (global — called by plugin)
-     cordova-plugin-customurlscheme fires this when
-     cordovaseeker://… URL arrives. It retries until this
-     function exists, so defining it early is safe.
-     ═══════════════════════════════════════════════ */
-  window.handleOpenURL = function(url) {
-    // setTimeout(0) ensures DOM + script state is settled
-    setTimeout(function() { processDeepLinkResponse(url); }, 0);
-  };
-
-  function processDeepLinkResponse(url) {
-    log('handleOpenURL: ' + url.slice(0, 80));
-    try {
-      var parsed = new URL(url);
-      var params = parsed.searchParams;
-
-      // ── Error response ──
-      var errCode = params.get('errorCode');
-      if (errCode) {
-        var errMsg = params.get('errorMessage') || 'Unknown error';
-        setStatus('Denied: ' + decodeURIComponent(errMsg));
-        log('Error ' + errCode + ': ' + errMsg);
-        pendingWallet = null;
-        return;
-      }
-
-      // ── Success: decrypt connect response ──
-      // Phantom uses phantom_encryption_public_key, Solflare uses solflare_encryption_public_key
-      var walletPubKeyB58 = params.get('phantom_encryption_public_key')
-                         || params.get('solflare_encryption_public_key');
-      if (!walletPubKeyB58) {
-        log('No encryption public key in response — params: ' + parsed.search);
-        setStatus('Error: bad response');
-        return;
-      }
-
-      var walletPubKey = bs58decode(walletPubKeyB58);
-      var nonce        = bs58decode(params.get('nonce'));
-      var data         = bs58decode(params.get('data'));
-
-      if (!dappKeypair) {
-        log('ERROR: dapp keypair lost (page reloaded?)');
-        setStatus('Error: keypair lost — try again');
-        return;
-      }
-
-      var sharedSecret = nacl.box.before(walletPubKey, dappKeypair.secretKey);
-      var decrypted    = nacl.box.open.after(data, nonce, sharedSecret);
-      if (!decrypted) {
-        log('ERROR: decryption failed');
-        setStatus('Error: decryption failed');
-        return;
-      }
-
-      var response = JSON.parse(new TextDecoder().decode(decrypted));
-      log('Decrypted OK — public_key: ' + response.public_key.slice(0, 8) + '...');
-
-      showConnected(response.public_key, pendingWallet || 'deep-link');
-      pendingWallet = null;
-      dappKeypair   = null; // no longer needed
-    } catch (e) {
-      log('Deep-link error: ' + e.message);
-      setStatus('Error: ' + e.message);
-      pendingWallet = null;
-    }
-  }
-
-  /* ═══════════════════════════════════════════════
-     Connection Method 1 — MWA (Native Plugin)
+     Wallet connect — MWA (Native Plugin)
      Uses the native Android MWA SDK via cordova-plugin-mwa.
      Fires startActivity with solana-wallet:// intent,
      wallet handles WebSocket + auth natively.
@@ -361,77 +239,6 @@
         setStatus(err.replace(/^MWA[: ]+/i, ''));
       }
     );
-  }
-
-  /* ═══════════════════════════════════════════════
-     Connection Method 2 — Deep Links
-     Phantom / Solflare encrypted connect protocol.
-     We generate an x25519 keypair, open the wallet
-     deep-link URL, and wait for the redirect back
-     to cordovaseeker://callback with encrypted payload.
-     ═══════════════════════════════════════════════ */
-  function connectDeepLink(wallet) {
-    if (!window.nacl) {
-      setStatus('Crypto library not loaded');
-      log('nacl unavailable — cannot do deep links');
-      return;
-    }
-
-    pendingWallet = wallet;
-    dappKeypair   = nacl.box.keyPair();
-    var pubKeyB58 = bs58encode(dappKeypair.publicKey);
-
-    var baseUrls = {
-      phantom:  'https://phantom.app/ul/v1/connect',
-      solflare: 'https://solflare.com/ul/v1/connect'
-    };
-
-    // app_url identifies your dapp to the wallet; redirect_link scheme must
-    // match URL_SCHEME in package.json (cordova-plugin-customurlscheme)
-    var params = new URLSearchParams({
-      app_url:                   'https://example.com',
-      dapp_encryption_public_key: pubKeyB58,
-      redirect_link:             'cordovaseeker://callback',
-      cluster:                   'mainnet-beta'
-    });
-
-    var url = baseUrls[wallet] + '?' + params.toString();
-    log(wallet + ': ' + url.slice(0, 70) + '...');
-    setStatus('Opening ' + wallet + '...');
-
-    // Cordova's allow-intent catches https://*/* and fires a system intent
-    // instead of navigating the WebView — our page stays loaded
-    window.location = url;
-  }
-
-  /* ═══════════════════════════════════════════════
-     Connection Method 3 — Burner Wallet
-     Local Ed25519 keypair, always available.
-     Stored in localStorage for persistence.
-     ═══════════════════════════════════════════════ */
-  function createBurner() {
-    if (!window.nacl) {
-      setStatus('Crypto library not loaded');
-      log('nacl unavailable — cannot generate keypair');
-      return;
-    }
-
-    // Restore existing burner if present
-    var existing = localStorage.getItem('burner_pubkey');
-    if (existing) {
-      log('Restored saved burner');
-      showConnected(existing, 'burner (saved)');
-      return;
-    }
-
-    var kp      = nacl.sign.keyPair();
-    var address = bs58encode(kp.publicKey);
-
-    localStorage.setItem('burner_pubkey',    address);
-    localStorage.setItem('burner_secretkey', bs58encode(kp.secretKey));
-
-    log('New burner: ' + address.slice(0, 8) + '...');
-    showConnected(address, 'burner');
   }
 
   /* ═══════════════════════════════════════════════
@@ -460,32 +267,24 @@
       log('Re-sent wallet info to iframe');
     }
 
-    // Future: handle wallet-sign-message, wallet-sign-transaction
+    // Sign a message with the connected MWA wallet (native approval dialog)
     if (data.type === 'wallet-sign-message') {
       log('Sign request (message) — id:' + data.id);
       var signIframe = document.getElementById('game');
-      // Burner signing
-      if (connectedMethod === 'burner' && window.nacl) {
-        var secretKeyB58 = localStorage.getItem('burner_secretkey');
-        if (secretKeyB58) {
-          var secretKey = bs58decode(secretKeyB58);
-          var msgBytes = new TextEncoder().encode(data.message);
-          var sig = nacl.sign.detached(msgBytes, secretKey);
-          signIframe.contentWindow.postMessage({
-            type: 'wallet-sign-response',
-            id: data.id,
-            signature: bs58encode(sig)
-          }, GAME_ORIGIN);
-          log('Signed message (burner)');
-          return;
-        }
+      var respond = function(payload) {
+        payload.type = 'wallet-sign-response';
+        payload.id = data.id;
+        signIframe.contentWindow.postMessage(payload, GAME_ORIGIN);
+      };
+      if (connectedMethod === 'MWA' && window.MWA) {
+        var messageB64 = btoa(String.fromCharCode.apply(null, new TextEncoder().encode(data.message)));
+        MWA.signMessage(messageB64,
+          function(result) { log('Signed message (MWA)'); respond({ signature: result.signature }); },
+          function(err)    { log('Sign failed: ' + err); respond({ error: err }); }
+        );
+      } else {
+        respond({ error: 'No wallet connected' });
       }
-      // Non-burner signing not yet implemented
-      signIframe.contentWindow.postMessage({
-        type: 'wallet-sign-response',
-        id: data.id,
-        error: 'Signing not supported for ' + connectedMethod + ' yet'
-      }, GAME_ORIGIN);
     }
   });
 
