@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://esm.sh; connect-src * https: wss: ws:; img-src * data:; style-src 'self' 'unsafe-inline'; frame-src 'self'; media-src 'self';">
+  <title>Seeker Clicker</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: #000; }
+    body {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; min-height: 100vh;
+      font-family: monospace; color: #fff;
+      padding: 40px 20px 60px;
+      -webkit-user-select: none; user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      overflow-y: auto;
+    }
+
+    .logo {
+      width: 120px; height: 120px; border-radius: 20px;
+      margin-bottom: 16px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 64px;
+      background: rgba(100,140,255,0.08);
+      border: 1px solid rgba(100,140,255,0.2);
+      box-shadow: 0 0 40px rgba(60,120,255,0.25);
+    }
+    .title {
+      font-size: 28px; font-weight: bold; letter-spacing: 6px;
+      text-shadow: 0 0 30px rgba(100,140,255,0.4), 0 0 60px rgba(100,140,255,0.15);
+      color: #e0e8ff;
+    }
+    .divider {
+      width: 60px; height: 1px; margin: 16px 0 20px;
+      background: linear-gradient(90deg, transparent, rgba(100,140,255,0.4), transparent);
+    }
+
+    #picker {
+      display: flex; flex-direction: column; gap: 14px;
+      width: 100%; max-width: 300px;
+    }
+    .btn {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: #fff; padding: 16px 20px;
+      font-family: monospace; font-size: 14px;
+      letter-spacing: 2px; border-radius: 10px;
+      cursor: pointer; text-align: center;
+      transition: background 0.15s, transform 0.1s, border-color 0.15s;
+    }
+    .btn:active { background: rgba(255,255,255,0.08); transform: scale(0.97); }
+    .btn:disabled { opacity: 0.3; pointer-events: none; }
+    .btn.primary {
+      border-color: rgba(100,140,255,0.35);
+      background: linear-gradient(180deg, rgba(60,90,200,0.10) 0%, rgba(40,60,140,0.05) 100%);
+    }
+    .btn.primary:active { background: rgba(80,120,255,0.12); }
+    .btn.danger {
+      border-color: rgba(255,80,80,0.2);
+      color: rgba(255,255,255,0.5); font-size: 12px; padding: 10px;
+    }
+
+    #status {
+      margin-top: 16px; font-size: 12px;
+      color: rgba(255,255,255,0.35); text-align: center;
+      max-width: 300px; word-break: break-all; min-height: 18px;
+    }
+    #connected {
+      display: none; text-align: center;
+      margin-top: 20px; width: 100%; max-width: 300px;
+    }
+    .lbl {
+      font-size: 10px; letter-spacing: 3px;
+      color: rgba(100,140,255,0.5); margin-bottom: 8px;
+    }
+    .addr {
+      font-size: 12px; color: #8aa8ff; word-break: break-all;
+      padding: 12px 14px; background: rgba(100,140,255,0.05);
+      border-radius: 8px; border: 1px solid rgba(112,144,255,0.12);
+      line-height: 1.5;
+    }
+    .powered {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      text-align: center; padding: 14px;
+      font-size: 10px; letter-spacing: 2px;
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <div class="logo" data-component="logo">&#9889;</div>
+  <div class="title" data-component="title">SEEKER CLICKER</div>
+  <div class="divider" data-component="divider"></div>
+
+  <div id="picker" data-component="wallet-picker">
+    <button class="btn primary" onclick="connectMWA()" data-testid="connect-wallet">
+      CONNECT WALLET
+    </button>
+    <button class="btn" onclick="launchGame()" data-testid="play-guest">
+      PLAY AS GUEST
+    </button>
+  </div>
+
+  <div id="status" data-component="status"></div>
+
+  <div id="connected" data-component="connected-panel">
+    <div class="lbl" data-component="connected-label">CONNECTED</div>
+    <div class="addr" id="addr" data-component="wallet-address"></div>
+    <button class="btn primary" onclick="launchGame()" style="margin-top:22px;" data-testid="play-button">
+      PLAY
+    </button>
+    <button class="btn danger" onclick="disconnect()" style="margin-top:8px;" data-testid="disconnect-button">
+      DISCONNECT
+    </button>
+  </div>
+
+  <div class="powered" data-component="footer">Open-source Seeker game template</div>
+
+  <!-- Cordova bridge — only exists when served from local www/ -->
+  <script src="cordova.js"></script>
+  <!-- TweetNaCl for x25519 deep-link encryption + Ed25519 burner keypairs -->
+  <script src="https://unpkg.com/tweetnacl@1.0.3/nacl-fast.min.js"></script>
+  <script>
+  'use strict';
+
+  /* ═══════════════════════════════════════════════
+     Base58 encode / decode
+     ═══════════════════════════════════════════════ */
+  var B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  var B58MAP = {};
+  for (var i = 0; i < B58.length; i++) B58MAP[B58[i]] = i;
+
+  function bs58encode(bytes) {
+    var zeros = 0;
+    while (zeros < bytes.length && bytes[zeros] === 0) zeros++;
+    var b = new Uint8Array(bytes); // copy — we mutate during division
+    var out = [];
+    var start = zeros;
+    while (start < b.length) {
+      var carry = 0;
+      for (var i = start; i < b.length; i++) {
+        carry = carry * 256 + b[i];
+        b[i] = (carry / 58) | 0;
+        carry %= 58;
+      }
+      out.push(B58[carry]);
+      while (start < b.length && b[start] === 0) start++;
+    }
+    for (var i = 0; i < zeros; i++) out.push('1');
+    return out.reverse().join('');
+  }
+
+  function bs58decode(str) {
+    var zeros = 0;
+    while (zeros < str.length && str[zeros] === '1') zeros++;
+    var b = new Uint8Array(str.length);
+    var len = 0;
+    for (var i = zeros; i < str.length; i++) {
+      var carry = B58MAP[str[i]];
+      if (carry === undefined) throw new Error('Bad base58: ' + str[i]);
+      for (var j = 0; j < len; j++) {
+        carry += b[j] * 58;
+        b[j] = carry & 0xff;
+        carry >>= 8;
+      }
+      while (carry > 0) {
+        b[len++] = carry & 0xff;
+        carry >>= 8;
+      }
+    }
+    var result = new Uint8Array(zeros + len);
+    for (var i = 0; i < len; i++) result[zeros + i] = b[len - 1 - i];
+    return result;
+  }
+
+  /* ═══════════════════════════════════════════════
+     State
+     ═══════════════════════════════════════════════ */
+  var dappKeypair      = null;   // x25519 for deep-link NaCl encryption
+  var pendingWallet    = null;   // 'phantom' | 'solflare' while awaiting redirect
+  var connectedAddress = null;   // wallet address after connect
+  var connectedMethod  = null;   // 'MWA' | 'phantom' | 'solflare' | 'burner'
+  // Local game bundled in www/game/. Swap for an https:// URL to load a
+  // remotely-hosted game instead (also update CSP frame-src + allow-navigation).
+  var GAME_URL    = 'game/index.html';
+  var GAME_ORIGIN = '*'; // local file — no meaningful origin; use event.source check instead
+
+  /* ═══════════════════════════════════════════════
+     UI helpers
+     ═══════════════════════════════════════════════ */
+  var $picker    = document.getElementById('picker');
+  var $status    = document.getElementById('status');
+  var $connected = document.getElementById('connected');
+  var $addr      = document.getElementById('addr');
+
+  function log(msg) {
+    console.log('[wallet-shell] ' + msg);
+  }
+
+  function setStatus(msg) { $status.textContent = msg; }
+
+  function showConnected(address, method) {
+    connectedAddress = address;
+    connectedMethod  = method;
+
+    $picker.style.display = 'none';
+    $connected.style.display = 'block';
+    $addr.textContent = address.slice(0, 4) + '...' + address.slice(-4);
+    setStatus('');
+    log('Connected: ' + address.slice(0, 8) + '...' + address.slice(-4));
+  }
+
+  function launchGame() {
+    $picker.style.display = 'none';
+    $connected.style.display = 'none';
+
+    // Create a fresh iframe each time
+    var old = document.getElementById('game');
+    if (old) old.remove();
+
+    var iframe = document.createElement('iframe');
+    iframe.id = 'game';
+    iframe.allow = 'fullscreen';
+    iframe.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;border:none;z-index:9999;';
+    document.body.appendChild(iframe);
+
+    if (connectedAddress) {
+      var sendWalletInfo = function() {
+        iframe.contentWindow.postMessage({
+          type: 'wallet-connected',
+          address: connectedAddress,
+          method: connectedMethod
+        }, GAME_ORIGIN);
+        log('Sent wallet-connected to iframe');
+      };
+
+      iframe.addEventListener('load', function onLoad() {
+        iframe.removeEventListener('load', onLoad);
+        setTimeout(sendWalletInfo, 800);
+      });
+    }
+
+    iframe.src = GAME_URL;
+    log('Loading game iframe...');
+  }
+
+  function disconnect() {
+    // Tell game iframe we're disconnecting
+    var iframe = document.getElementById('game');
+    if (iframe && connectedAddress) {
+      try {
+        iframe.contentWindow.postMessage({ type: 'wallet-disconnected' }, GAME_ORIGIN);
+      } catch (_) {}
+    }
+
+    // Destroy iframe completely
+    if (iframe) iframe.remove();
+
+    $picker.style.display = 'flex';
+    $connected.style.display = 'none';
+    connectedAddress = null;
+    connectedMethod  = null;
+    setStatus('');
+    log('Disconnected');
+  }
+
+  /* ═══════════════════════════════════════════════
+     Deep-link handler (global — called by plugin)
+     cordova-plugin-customurlscheme fires this when
+     seekerclicker://… URL arrives. It retries until this
+     function exists, so defining it early is safe.
+     ═══════════════════════════════════════════════ */
+  window.handleOpenURL = function(url) {
+    // setTimeout(0) ensures DOM + script state is settled
+    setTimeout(function() { processDeepLinkResponse(url); }, 0);
+  };
+
+  function processDeepLinkResponse(url) {
+    log('handleOpenURL: ' + url.slice(0, 80));
+    try {
+      var parsed = new URL(url);
+      var params = parsed.searchParams;
+
+      // ── Error response ──
+      var errCode = params.get('errorCode');
+      if (errCode) {
+        var errMsg = params.get('errorMessage') || 'Unknown error';
+        setStatus('Denied: ' + decodeURIComponent(errMsg));
+        log('Error ' + errCode + ': ' + errMsg);
+        pendingWallet = null;
+        return;
+      }
+
+      // ── Success: decrypt connect response ──
+      // Phantom uses phantom_encryption_public_key, Solflare uses solflare_encryption_public_key
+      var walletPubKeyB58 = params.get('phantom_encryption_public_key')
+                         || params.get('solflare_encryption_public_key');
+      if (!walletPubKeyB58) {
+        log('No encryption public key in response — params: ' + parsed.search);
+        setStatus('Error: bad response');
+        return;
+      }
+
+      var walletPubKey = bs58decode(walletPubKeyB58);
+      var nonce        = bs58decode(params.get('nonce'));
+      var data         = bs58decode(params.get('data'));
+
+      if (!dappKeypair) {
+        log('ERROR: dapp keypair lost (page reloaded?)');
+        setStatus('Error: keypair lost — try again');
+        return;
+      }
+
+      var sharedSecret = nacl.box.before(walletPubKey, dappKeypair.secretKey);
+      var decrypted    = nacl.box.open.after(data, nonce, sharedSecret);
+      if (!decrypted) {
+        log('ERROR: decryption failed');
+        setStatus('Error: decryption failed');
+        return;
+      }
+
+      var response = JSON.parse(new TextDecoder().decode(decrypted));
+      log('Decrypted OK — public_key: ' + response.public_key.slice(0, 8) + '...');
+
+      showConnected(response.public_key, pendingWallet || 'deep-link');
+      pendingWallet = null;
+      dappKeypair   = null; // no longer needed
+    } catch (e) {
+      log('Deep-link error: ' + e.message);
+      setStatus('Error: ' + e.message);
+      pendingWallet = null;
+    }
+  }
+
+  /* ═══════════════════════════════════════════════
+     Connection Method 1 — MWA (Native Plugin)
+     Uses the native Android MWA SDK via cordova-plugin-mwa.
+     Fires startActivity with solana-wallet:// intent,
+     wallet handles WebSocket + auth natively.
+     ═══════════════════════════════════════════════ */
+  function connectMWA() {
+    if (!window.MWA) {
+      log('MWA plugin not loaded');
+      setStatus('Wallet unavailable');
+      return;
+    }
+    setStatus('Opening wallet...');
+    log('MWA: calling native authorize...');
+
+    MWA.authorize(
+      function(result) {
+        log('Authorized: ' + result.address.slice(0, 8) + '...');
+        showConnected(result.address, 'MWA');
+      },
+      function(err) {
+        log('Connect failed: ' + err);
+        setStatus(err.replace(/^MWA[: ]+/i, ''));
+      }
+    );
+  }
+
+  /* ═══════════════════════════════════════════════
+     Connection Method 2 — Deep Links
+     Phantom / Solflare encrypted connect protocol.
+     We generate an x25519 keypair, open the wallet
+     deep-link URL, and wait for the redirect back
+     to seekerclicker://callback with encrypted payload.
+     ═══════════════════════════════════════════════ */
+  function connectDeepLink(wallet) {
+    if (!window.nacl) {
+      setStatus('Crypto library not loaded');
+      log('nacl unavailable — cannot do deep links');
+      return;
+    }
+
+    pendingWallet = wallet;
+    dappKeypair   = nacl.box.keyPair();
+    var pubKeyB58 = bs58encode(dappKeypair.publicKey);
+
+    var baseUrls = {
+      phantom:  'https://phantom.app/ul/v1/connect',
+      solflare: 'https://solflare.com/ul/v1/connect'
+    };
+
+    // app_url identifies your dapp to the wallet; redirect_link scheme must
+    // match URL_SCHEME in package.json (cordova-plugin-customurlscheme)
+    var params = new URLSearchParams({
+      app_url:                   'https://example.com',
+      dapp_encryption_public_key: pubKeyB58,
+      redirect_link:             'seekerclicker://callback',
+      cluster:                   'mainnet-beta'
+    });
+
+    var url = baseUrls[wallet] + '?' + params.toString();
+    log(wallet + ': ' + url.slice(0, 70) + '...');
+    setStatus('Opening ' + wallet + '...');
+
+    // Cordova's allow-intent catches https://*/* and fires a system intent
+    // instead of navigating the WebView — our page stays loaded
+    window.location = url;
+  }
+
+  /* ═══════════════════════════════════════════════
+     Connection Method 3 — Burner Wallet
+     Local Ed25519 keypair, always available.
+     Stored in localStorage for persistence.
+     ═══════════════════════════════════════════════ */
+  function createBurner() {
+    if (!window.nacl) {
+      setStatus('Crypto library not loaded');
+      log('nacl unavailable — cannot generate keypair');
+      return;
+    }
+
+    // Restore existing burner if present
+    var existing = localStorage.getItem('burner_pubkey');
+    if (existing) {
+      log('Restored saved burner');
+      showConnected(existing, 'burner (saved)');
+      return;
+    }
+
+    var kp      = nacl.sign.keyPair();
+    var address = bs58encode(kp.publicKey);
+
+    localStorage.setItem('burner_pubkey',    address);
+    localStorage.setItem('burner_secretkey', bs58encode(kp.secretKey));
+
+    log('New burner: ' + address.slice(0, 8) + '...');
+    showConnected(address, 'burner');
+  }
+
+  /* ═══════════════════════════════════════════════
+     postMessage bridge — listen for game requests
+     ═══════════════════════════════════════════════ */
+  window.addEventListener('message', function(event) {
+    // Local iframe has no https origin — verify the sender is our game frame
+    var gameFrame = document.getElementById('game');
+    if (!gameFrame || event.source !== gameFrame.contentWindow) return;
+    var data = event.data;
+    if (!data || !data.type) return;
+
+    if (data.type === 'wallet-disconnect') {
+      log('Game requested disconnect');
+      disconnect();
+    }
+
+    if (data.type === 'wallet-request-info' && connectedAddress) {
+      // Game is asking for wallet info (e.g. after late init)
+      var iframe = document.getElementById('game');
+      iframe.contentWindow.postMessage({
+        type: 'wallet-connected',
+        address: connectedAddress,
+        method: connectedMethod
+      }, GAME_ORIGIN);
+      log('Re-sent wallet info to iframe');
+    }
+
+    // Future: handle wallet-sign-message, wallet-sign-transaction
+    if (data.type === 'wallet-sign-message') {
+      log('Sign request (message) — id:' + data.id);
+      var signIframe = document.getElementById('game');
+      // Burner signing
+      if (connectedMethod === 'burner' && window.nacl) {
+        var secretKeyB58 = localStorage.getItem('burner_secretkey');
+        if (secretKeyB58) {
+          var secretKey = bs58decode(secretKeyB58);
+          var msgBytes = new TextEncoder().encode(data.message);
+          var sig = nacl.sign.detached(msgBytes, secretKey);
+          signIframe.contentWindow.postMessage({
+            type: 'wallet-sign-response',
+            id: data.id,
+            signature: bs58encode(sig)
+          }, GAME_ORIGIN);
+          log('Signed message (burner)');
+          return;
+        }
+      }
+      // Non-burner signing not yet implemented
+      signIframe.contentWindow.postMessage({
+        type: 'wallet-sign-response',
+        id: data.id,
+        error: 'Signing not supported for ' + connectedMethod + ' yet'
+      }, GAME_ORIGIN);
+    }
+  });
+
+  /* ═══════════════════════════════════════════════
+     Init
+     ═══════════════════════════════════════════════ */
+  log('Shell loaded');
+
+  document.addEventListener('deviceready', function() {
+    log('deviceready');
+  }, false);
+  </script>
+</body>
+</html>
