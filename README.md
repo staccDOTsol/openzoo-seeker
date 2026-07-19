@@ -76,3 +76,11 @@ Requirements: Android SDK + JDK 17 (`cordova requirements android` to verify).
 ## License
 
 MIT
+
+<!-- hypertribe:sponsors:start -->
+## Sponsors
+
+[![CordovaSeeker Sponsors](https://api.tribe.run/tokens/HsHCt9JjeGgX3nTpBHh1Vkex267hq9iGNtr8dgxqkpqz/sponsors.svg)](https://tribe.run/token/HsHCt9JjeGgX3nTpBHh1Vkex267hq9iGNtr8dgxqkpqz)
+
+Become a sponsor on [Tribe.run](https://tribe.run/token/HsHCt9JjeGgX3nTpBHh1Vkex267hq9iGNtr8dgxqkpqz).
+<!-- hypertribe:sponsors:end -->
