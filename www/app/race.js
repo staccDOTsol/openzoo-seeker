@@ -3,8 +3,7 @@
    Cheap classifier among those X. If none clear, last of those X.
    Empty / HTTP / pay / fetch-failed are NOT countable.
    All-fail never ships a single model's fetch-failed as the winner.
-   Do not wait on the slowest. Stream live if already streaming.
-   Chat only: no SPAWN, no worktrees, no desktop podagent. */
+   Do not wait on the slowest. Stream live if already streaming. */
 (function (root) {
   'use strict';
 

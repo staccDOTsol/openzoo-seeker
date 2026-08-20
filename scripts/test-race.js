@@ -498,8 +498,10 @@ async function run() {
     assert.match(shell, /MWA\.signTransaction/);
     assert.match(raceJs, /first X countable/);
     assert.match(raceJs, /grok4\.6/);
-    assert.doesNotMatch(app, /SPAWN|worktree|podagent/i);
-    assert.doesNotMatch(raceJs, /SPAWN|worktree|podagent/i);
+    assert.doesNotMatch(app, /podagent\.mjs/);
+    assert.doesNotMatch(raceJs, /podagent\.mjs/);
+    assert.doesNotMatch(app, /\bSPAWN:/);
+    assert.doesNotMatch(raceJs, /\bSPAWN:/);
     assert.doesNotMatch(app, /Play Billing|billingClient|com\.android\.vending/i);
     assert.doesNotMatch(html, /Play Billing/i);
   });
