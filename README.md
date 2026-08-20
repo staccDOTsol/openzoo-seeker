@@ -32,6 +32,7 @@ Race (the spend dial, not spill): pick a band — cheap / medium / expensive / g
 |---|---|---|
 | shell → app | `wallet-connected` | `{ address, method }` |
 | shell → app | `wallet-disconnected` | — |
+| app → shell | `openzoo-chrome-ready` | first threads/chat paint — dismiss `#oz-boot`. Not after `/v1/models` |
 | app → shell | `wallet-request-info` | late-init wallet info |
 | app → shell | `wallet-exit` | close iframe, keep wallet |
 | app → shell | `wallet-disconnect` | exit and disconnect |
