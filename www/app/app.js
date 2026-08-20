@@ -58,7 +58,7 @@
       ? Race.parseRaceValue((saved && saved.race != null)
         ? Race.raceSelectValue(saved.race, saved.raceNeed)
         : (Race.DEFAULT_NEED + ' ' + Race.DEFAULT_N))
-      : { race: 0, raceNeed: 1 };
+      : { race: 4, raceNeed: 2 };
     return {
       tier: (Race && Race.normalizeTier(saved && saved.tier)) || 'medium',
       race: parsed.race,
@@ -902,6 +902,10 @@
       if (racing) {
         if (window.OpenZooPay) OpenZooPay.clearPending402();
         var models = OpenZooRace.tierModels(spend.tier, spend.race, true, modelIds);
+        if (Auto && Auto.isAuto(pinnedModel()) && Auto.shortlist) {
+          var picked = await Auto.shortlist(text, spend.race);
+          if (picked && picked.length) models = picked;
+        }
         if (models.length < 2) {
           racing = false;
         } else {

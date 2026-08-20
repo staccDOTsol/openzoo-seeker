@@ -104,6 +104,28 @@
     return /deepseek|grok|thinking|fable|sonnet-5|-r1|reason/i.test(id) ? 16384 : 4096;
   }
 
+  function shortlist(text, n) {
+    n = Math.max(2, Number(n) || 4);
+    var gw = (root.OpenZooPay && root.OpenZooPay.GATEWAY) ? String(root.OpenZooPay.GATEWAY).replace(/\/$/, '') : '';
+    var urls = [];
+    if (gw) urls.push(gw + '/v1/route');
+    urls.push('http://127.0.0.1:8402/v1/route');
+    var body = JSON.stringify({ messages: [{ role: 'user', content: String(text || '') }], k: n });
+    return (async function () {
+      for (var i = 0; i < urls.length; i++) {
+        try {
+          var r = await fetch(urls[i], { method: 'POST', headers: { 'content-type': 'application/json' }, body: body });
+          if (!r.ok) continue;
+          var j = await r.json();
+          var list = ((j && j.shortlist) || []).map(function (s) { return s && s.model; }).filter(Boolean);
+          if (j && j.model && list.indexOf(j.model) < 0) list.unshift(j.model);
+          if (list.length) return list.slice(0, n);
+        } catch (_) {}
+      }
+      return [];
+    })();
+  }
+
   var api = {
     AUTO_MODEL: AUTO_MODEL,
     AUTO_LABEL: AUTO_LABEL,
@@ -117,7 +139,8 @@
     compactModelId: compactModelId,
     compactRoutedModel: compactRoutedModel,
     displayRouted: displayRouted,
-    reasoningMaxTokens: reasoningMaxTokens
+    reasoningMaxTokens: reasoningMaxTokens,
+    shortlist: shortlist
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
