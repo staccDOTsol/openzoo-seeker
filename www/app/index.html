@@ -80,9 +80,18 @@
   .achip { display: flex; align-items: center; gap: 6px; background: #2c2c2e; color: #ececec; border-radius: 10px;
            padding: 4px 8px; font-size: 12px; }
   .achip .ax { cursor: pointer; color: #8e8e93; }
-  #walletOverlay, #pasteOverlay { position: fixed; inset: 0; background: rgba(0,0,0,.66); z-index: 1200;
+  #walletOverlay, #pasteOverlay, #promptOverlay { position: fixed; inset: 0; background: rgba(0,0,0,.66); z-index: 1200;
                    display: none; align-items: center; justify-content: center; padding: 24px; }
-  #walletOverlay.show, #pasteOverlay.show { display: flex; }
+  #walletOverlay.show, #pasteOverlay.show, #promptOverlay.show { display: flex; }
+  #promptOverlay { z-index: 1300; }
+  #promptBox { width: 100%; max-width: 560px; background: #111113; border: 1px solid #2c2c2e;
+               border-radius: 16px; padding: 20px 22px; }
+  #promptBox h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
+  #promptBody { color: #ececec; font-size: 14px; line-height: 1.5; margin-bottom: 12px; }
+  #promptChoices { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+  #promptChoices:empty { display: none; }
+  .choice { background: #1c1c1e; border: 1px solid #2c2c2e; border-radius: 12px; padding: 8px 12px;
+            color: #ececec; cursor: pointer; font: inherit; }
   #walletBox, #pasteBox { width: 100%; max-width: 560px; max-height: 82vh; overflow-y: auto; background: #111113;
                border: 1px solid #2c2c2e; border-radius: 16px; padding: 20px 22px; }
   #walletBox h3, #pasteBox h3 { margin: 0 0 2px; font-size: 15px; font-weight: 600; }
@@ -138,6 +147,22 @@
         <button class="ghost" id="walletClose" type="button">Close</button>
       </div>
       <div class="wnote">Top up converts what this wallet already holds so the next call can settle. Nothing else is shown.</div>
+    </div>
+  </div>
+
+  <div id="promptOverlay" data-component="pay-prompt">
+    <div id="promptBox">
+      <h3 id="promptTitle">Payment</h3>
+      <div id="promptBody"></div>
+      <div id="promptAddr" class="wrow" style="display:none">
+        <div class="wlab">Wallet · tap to copy</div>
+        <div class="waddr copyable" id="promptAddrVal"></div>
+      </div>
+      <div id="promptChoices"></div>
+      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+        <button class="ghost" id="promptOk" type="button">Continue</button>
+        <button class="ghost" id="promptCancel" type="button">Cancel</button>
+      </div>
     </div>
   </div>
 

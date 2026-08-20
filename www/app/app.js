@@ -117,12 +117,117 @@
     });
   }
 
+  var promptWaiter = null;
+
+  function hidePrompt() {
+    var overlay = $('promptOverlay');
+    if (overlay) overlay.classList.remove('show');
+    if (promptWaiter) {
+      var w = promptWaiter;
+      promptWaiter = null;
+      w(false);
+    }
+  }
+
+  function showPayPrompt(spec) {
+    spec = spec || {};
+    hidePrompt();
+    return new Promise(function (resolve) {
+      promptWaiter = resolve;
+      $('promptTitle').textContent = spec.title || 'Payment';
+      $('promptBody').textContent = spec.message || '';
+      var addrRow = $('promptAddr');
+      var addrVal = $('promptAddrVal');
+      if (spec.address) {
+        addrRow.style.display = '';
+        addrVal.textContent = spec.address;
+        addrVal.onclick = function () { copyAddress(spec.address); };
+      } else {
+        addrRow.style.display = 'none';
+      }
+      var choices = $('promptChoices');
+      choices.innerHTML = '';
+      (spec.choices || []).forEach(function (c) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'choice';
+        btn.textContent = c.label;
+        btn.onclick = function () { copyAddress(spec.address || c.value); };
+        choices.appendChild(btn);
+      });
+      $('promptOk').textContent = spec.okLabel || 'Continue';
+      $('promptOk').onclick = function () {
+        var w = promptWaiter;
+        promptWaiter = null;
+        $('promptOverlay').classList.remove('show');
+        if (w) w(true);
+      };
+      $('promptCancel').onclick = function () {
+        var w = promptWaiter;
+        promptWaiter = null;
+        $('promptOverlay').classList.remove('show');
+        if (window.OpenZooPay) OpenZooPay.clearPending402();
+        if (w) w(false);
+      };
+      $('promptOverlay').classList.add('show');
+    });
+  }
+
+  function confirmWrap(info) {
+    var label = (info && info.label) || 'TOKEN';
+    var message = (info && info.message) || ('You have ' + label + '. Wrap enough to send this?');
+    return showPayPrompt({
+      title: 'Wrap ' + label,
+      message: message,
+      okLabel: 'Wrap'
+    });
+  }
+
+  function showFundPrompt(err) {
+    var address = (err && err.address) || wallet.address;
+    var prompt = err && (err.prompt || err.code);
+    if (prompt === 'short-sol') {
+      return showPayPrompt({
+        title: 'Network fee',
+        message: (err && (err.promptCopy || err.message)) || 'Needs a little SOL for the network fee',
+        address: address,
+        okLabel: 'Copied? Retry'
+      }).then(function (ok) {
+        if (ok && address) copyAddress(address);
+        return ok;
+      });
+    }
+    var holdings = (err && err.holdings) || [];
+    var choices = ['TOKEN', 'USDC', 'LEOS'].map(function (label) {
+      return { label: label, value: address };
+    });
+    if (holdings.length) {
+      choices = holdings.map(function (h) { return { label: h.label, value: address }; });
+    }
+    return showPayPrompt({
+      title: 'Send tokens',
+      message: (err && (err.promptCopy || err.message)) || 'Send TOKEN, USDC, or LEOS to this wallet.',
+      address: address,
+      choices: choices,
+      okLabel: 'Copied? Retry'
+    }).then(function (ok) {
+      if (ok && address) copyAddress(address);
+      return ok;
+    });
+  }
+
+  function isFundPrompt(err) {
+    var code = err && (err.prompt || err.code);
+    return code === 'short-sol' || code === 'short-tokens' || code === 'no-balance' || code === 'underfunded';
+  }
+
   function payCtx() {
     return {
       payer: wallet.address,
       signTransaction: signTransaction,
       signAndSendTransaction: signAndSendTransaction,
-      onStatus: setBanner
+      onStatus: setBanner,
+      confirmWrap: confirmWrap
     };
   }
 
@@ -441,6 +546,21 @@
       }
       saveStore();
     } catch (e) {
+      if (e && (e.code === 'wrap-cancelled' || /wrap cancelled/i.test(e.message || ''))) {
+        t.messages.pop();
+        setBanner('Wrap cancelled.');
+        state.busy = false;
+        render();
+        return;
+      }
+      if (isFundPrompt(e)) {
+        t.messages.pop();
+        saveStore();
+        state.busy = false;
+        render();
+        showFundPrompt(e);
+        return;
+      }
       var fail = OpenZooPay.humanizeError(e);
       t.messages.pop();
       t.messages.push({ role: 'assistant', content: 'the zoo hiccuped: ' + fail });
@@ -488,10 +608,17 @@
   async function topUpNow() {
     if (!wallet.address) { setBanner('Connect a wallet first.'); return; }
     try {
-      var result = await OpenZooPay.topUpFromHoldings(wallet.address, signAndSendTransaction, setBanner);
+      var result = await OpenZooPay.topUpFromHoldings(wallet.address, signAndSendTransaction, {
+        onStatus: setBanner,
+        confirmWrap: confirmWrap
+      });
       setBanner(result.wrapped ? 'Top-up sent.' : 'This wallet is already ready to pay.');
       openWallet();
     } catch (e) {
+      if (isFundPrompt(e)) {
+        showFundPrompt(e);
+        return;
+      }
       setBanner(OpenZooPay.humanizeError(e));
     }
   }
@@ -562,4 +689,9 @@
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState !== 'hidden' && window.OpenZooPay) OpenZooPay.notifyResume();
   });
+  if ($('promptOverlay')) {
+    $('promptOverlay').addEventListener('click', function (e) {
+      if (e.target === $('promptOverlay')) hidePrompt();
+    });
+  }
 })();

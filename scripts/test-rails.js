@@ -129,9 +129,51 @@ async function run() {
   await check('empty wallet steers without twin names', () => {
     const plan = pay.pickPayablePlan(live402, {}, fixtureKinds);
     assert.strictEqual(plan.ok, false);
-    assert.match(plan.reason, /Add USDC, TOKEN, or LEOS/);
+    assert.match(plan.reason, /Send TOKEN, USDC, or LEOS/);
+    assert.strictEqual(plan.prompt, 'short-tokens');
     assert.doesNotMatch(plan.reason, TWIN_RE);
     assert.doesNotMatch(plan.reason, DRAIN_RE);
+  });
+
+  await check('pickLargestUseful wraps $10 TOKEN even when raw < twin maxAmountRequired', () => {
+    const tenDollarsIsh = '10000000';
+    assert.ok(BigInt(tenDollarsIsh) < BigInt(live402[2].maxAmountRequired));
+    const plan = pay.pickLargestUseful(live402, { [TOKEN]: tenDollarsIsh }, fixtureKinds);
+    assert.strictEqual(plan.ok, true);
+    assert.strictEqual(plan.accept.asset, W2);
+    assert.ok(plan.wrap);
+    assert.strictEqual(plan.wrap.from, 'TOKEN');
+    assert.strictEqual(plan.prompt, 'wrap');
+    assert.match(plan.promptCopy, /You have TOKEN\. Wrap enough to send this\?/);
+  });
+
+  await check('pickLargestUseful gates on held > 0, never 1:1 twin-need vs underlying', () => {
+    const plan = pay.pickLargestUseful(live402, { [TOKEN]: '1' }, fixtureKinds);
+    assert.strictEqual(plan.ok, true);
+    assert.strictEqual(plan.accept.asset, W2);
+    assert.ok(plan.wrap);
+    assert.notStrictEqual(plan.wrap.sharesNeeded, '1');
+    assert.ok(BigInt(plan.wrap.sharesNeeded) > 1n);
+  });
+
+  await check('prompt copy is wrap / short SOL / short tokens', () => {
+    assert.strictEqual(pay.COPY.wrap('TOKEN'), 'You have TOKEN. Wrap enough to send this?');
+    assert.strictEqual(pay.COPY.wrap('USDC'), 'You have USDC. Wrap enough to send this?');
+    assert.strictEqual(pay.COPY.wrap('LEOS'), 'You have LEOS. Wrap enough to send this?');
+    assert.strictEqual(pay.COPY.shortSol, 'Needs a little SOL for the network fee');
+    assert.strictEqual(pay.COPY.shortTokens, 'Send TOKEN, USDC, or LEOS to this wallet.');
+    assert.strictEqual(pay.COPY.copied, 'Copied');
+  });
+
+  await check('pending 402 persists and clears', () => {
+    pay.clearPending402();
+    assert.strictEqual(pay.loadPending402(), null);
+    pay.savePending402({ url: 'https://x402-tokens.fly.dev/v1/chat/completions', method: 'POST' });
+    const got = pay.loadPending402();
+    assert.ok(got);
+    assert.strictEqual(got.url, 'https://x402-tokens.fly.dev/v1/chat/completions');
+    pay.clearPending402();
+    assert.strictEqual(pay.loadPending402(), null);
   });
 
   await check('eip155-only 402 is rejected', () => {
@@ -200,6 +242,24 @@ async function run() {
     assert.doesNotMatch(js, DRAIN_RE);
     assert.doesNotMatch(js, /:8402/);
     assert.doesNotMatch(js, /wTOKENx|yUSDCx|wLEOSx/);
+    assert.match(js, /Wrap enough to send this\?/);
+    assert.match(js, /Needs a little SOL for the network fee/);
+  });
+
+  await check('shell stays on bundled UI, copyable address, no raw Load failed', () => {
+    const shell = fs.readFileSync(path.join(__dirname, '..', 'www/index.html'), 'utf8');
+    assert.match(shell, /var GAME_URL\s*=\s*'app\/index\.html'/);
+    assert.doesNotMatch(shell, /:8402/);
+    assert.match(shell, /user-select:\s*all/);
+    assert.match(shell, /toast\('copied'\)/);
+    assert.match(shell, /copyToClipboard/);
+    assert.match(fs.readFileSync(path.join(__dirname, '..', 'www/app/pay.js'), 'utf8'), /openzoo\.seeker\.pending402/);
+    const errPage = fs.readFileSync(path.join(__dirname, '..', 'www/error.html'), 'utf8');
+    assert.doesNotMatch(errPage, /Load failed/i);
+    assert.match(errPage, /Reconnecting/);
+    const cfg = fs.readFileSync(path.join(__dirname, '..', 'config.xml'), 'utf8');
+    assert.match(cfg, /ErrorUrl/);
+    assert.match(cfg, /error\.html/);
   });
 
   await check('depositForShares adds genesis liquidity when empty', () => {
