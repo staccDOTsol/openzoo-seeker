@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https://x402-tokens.fly.dev https://api.mainnet-beta.solana.com https://solana-rpc.publicnode.com https: wss: ws:; img-src * data:; style-src 'self' 'unsafe-inline'; frame-src 'self' https://x402-tokens.fly.dev; media-src 'self';">
+    content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https://x402-tokens.fly.dev https://x402.accrue.fund https://api.mainnet-beta.solana.com https://solana-rpc.publicnode.com https: wss: ws:; img-src * data:; style-src 'self' 'unsafe-inline'; frame-src 'self'; media-src 'self';">
   <title>OpenZoo</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -116,7 +116,7 @@
     </button>
   </div>
 
-  <div class="powered" data-component="footer">pay-per-call chat on Seeker</div>
+  <div class="powered" data-component="footer">threads · chat · wallet</div>
 
   <!-- Cordova bridge — only exists when served from local www/ -->
   <script src="cordova.js"></script>
@@ -128,11 +128,8 @@
      ═══════════════════════════════════════════════ */
   var connectedAddress = null;   // wallet address after connect
   var connectedMethod  = null;   // 'MWA'
-  // Bundled chat UI (trimmed from www/app/gui.desktop.html).
-  // Do NOT set this to https://chat.openzoo.fun — that is Open WebUI +
-  // Wallet Standard / injected Phantom. In an iframe it shows
-  // "No Solana wallet detected" and does not speak wallet-sign-transaction.
-  // https://openzoo.fun is a landing page, not a chat UI.
+  // Bundled grokui-on-a-phone UI (threads / chat / wallet).
+  // Do NOT set this to https://chat.openzoo.fun or :8402.
   var GAME_URL    = 'app/index.html';
   var GAME_ORIGIN = '*'; // local file — no meaningful origin; use event.source check instead
 
@@ -246,6 +243,7 @@
       function(result) {
         log('Authorized: ' + result.address.slice(0, 8) + '...');
         showConnected(result.address, 'MWA');
+        launchGame();
       },
       function(err) {
         log('Connect failed: ' + err);
@@ -302,6 +300,26 @@
         );
       } else {
         respond({ error: 'No wallet connected' });
+      }
+    }
+
+    // Sign a wrap / top-up tx AND submit it. Payment still uses sign-only.
+    if (data.type === 'wallet-sign-and-send-transaction') {
+      log('Sign+send request (wrap) — id:' + data.id);
+      var sendIframe = document.getElementById('game');
+      var respondSend = function(payload) {
+        payload.type = 'wallet-sign-and-send-transaction-response';
+        payload.id = data.id;
+        sendIframe.contentWindow.postMessage(payload, GAME_ORIGIN);
+      };
+      var sendTxB64 = data.transaction || data.txB64 || '';
+      if (connectedMethod === 'MWA' && window.MWA) {
+        MWA.signAndSendTransaction(sendTxB64,
+          function(result) { log('Signed+sent wrap (MWA)'); respondSend({ signature: result.signature }); },
+          function(err)    { log('Sign+send failed: ' + err); respondSend({ error: err }); }
+        );
+      } else {
+        respondSend({ error: 'No wallet connected' });
       }
     }
 

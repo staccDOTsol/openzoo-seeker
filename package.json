@@ -10,6 +10,7 @@
     "run": "cordova run android",
     "clean": "cordova clean android",
     "requirements": "cordova requirements android",
+    "test": "node scripts/test-rails.js",
     "test:rails": "node scripts/test-rails.js"
   },
   "keywords": [

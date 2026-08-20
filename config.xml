@@ -12,6 +12,8 @@
     <!-- Gateway + public Solana RPCs used by the iframe for chat/bind/stats and balance reads -->
     <allow-navigation href="https://x402-tokens.fly.dev/*" />
     <access origin="https://x402-tokens.fly.dev" />
+    <allow-navigation href="https://x402.accrue.fund/*" />
+    <access origin="https://x402.accrue.fund" />
     <allow-navigation href="https://api.mainnet-beta.solana.com/*" />
     <access origin="https://api.mainnet-beta.solana.com" />
     <allow-navigation href="https://solana-rpc.publicnode.com/*" />

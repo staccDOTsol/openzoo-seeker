@@ -2,15 +2,21 @@
 'use strict';
 
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 const pay = require('../www/app/pay.js');
+const wrap = require('../www/app/wrap.js');
+const solana = require('../www/app/solana.js');
 
-const Y = pay.MINTS.YUSDCX;
-const W_DOC = pay.MINTS.WTOKENX;       // Bo7x… documented twin
-const W_LIVE = pay.MINTS.WTOKENX_LIVE; // FXYk… quoted live 2026-08-20
-const L = pay.MINTS.WLEOSX;
-const USDC = pay.MINTS.USDC;
-const TOKEN = pay.MINTS.TOKEN;
-const LEOS = pay.MINTS.LEOS;
+const W2 = wrap.WTOKENX2;
+const DRAINED = wrap.DRAINED_MINT;
+const Y = '6ZjjxcoicqM4nniddkuPVwew4PDwY3swbfHsGbCuLuTv';
+const L = '3FViQRMqtG6dUDFxZyyVvpM9xTHsKdX7uqZ5jvL8NZ35';
+const USDC = pay.HOLDING_MINTS.USDC;
+const TOKEN = pay.HOLDING_MINTS.TOKEN;
+const LEOS = pay.HOLDING_MINTS.LEOS;
+const OWNER = 'WzMaL78srutrF6CsxEkWuhMaDF5HZA6jNRaEPengqpb';
+const BLOCKHASH = '11111111111111111111111111111111';
 
 function row(asset, amount, symbol, network) {
   return {
@@ -18,170 +24,192 @@ function row(asset, amount, symbol, network) {
     network: network || 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
     asset,
     maxAmountRequired: String(amount),
-    extra: { symbol, decimals: 6, feePayer: 'WzMaL78srutrF6CsxEkWuhMaDF5HZA6jNRaEPengqpb' }
+    extra: { symbol, decimals: 6, feePayer: OWNER }
   };
 }
 
-const liveShape = [
-  row(Y, 7027, 'yUSDCx'),
+const live402 = [
+  row(Y, 7018, 'yUSDCx'),
   {
     scheme: 'exact',
     network: 'eip155:8453',
     asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-    maxAmountRequired: '7012',
+    maxAmountRequired: '7003',
     extra: { symbol: 'USDC', decimals: 6 }
   },
-  row(W_LIVE, 32316451, 'wTOKENx'),
-  row(L, 46522762707, 'wLEOSx')
+  row(W2, 20109289, 'wTOKENx'),
+  row(L, 46662470014, 'wLEOSx'),
+  row(DRAINED, 1, 'wTOKENx')
 ];
 
-const TWIN_RE = /yUSDCx|wTOKENx|wLEOSx/;
+const fixtureKinds = JSON.parse(fs.readFileSync(
+  path.join(__dirname, 'fixtures', 'supported.json'),
+  'utf8'
+)).kinds;
 
 let passed = 0;
 function check(name, fn) {
-  fn();
+  const out = fn();
+  if (out && typeof out.then === 'function') {
+    return out.then(() => {
+      passed += 1;
+      console.log('ok  ' + name);
+    });
+  }
   passed += 1;
   console.log('ok  ' + name);
+  return Promise.resolve();
 }
 
-check('BUILD_WRAPS is false until a real POST proves wrap+transfer', () => {
-  assert.strictEqual(pay.BUILD_WRAPS, false);
-});
+const TWIN_RE = /yUSDCx|wTOKENx2?|wLEOSx|fSPCX/;
+const BIND_RE = /\/v1\/hrr\/bind|\/v1\/bind|context_id|context id|bind hash/i;
+const DRAIN_RE = /Bo7xBF7SY8EyUBPUxRP66SFafxoPf2n5uqiLjbxEebx9/;
 
-check('display labels never leak twin names', () => {
-  assert.strictEqual(pay.displaySymbol(liveShape[0]), 'USDC');
-  assert.strictEqual(pay.displaySymbol(liveShape[2]), 'TOKEN');
-  assert.strictEqual(pay.displaySymbol(liveShape[3]), 'LEOS');
-});
+async function run() {
+  await check('live /supported is reachable and lists wTOKENx2', async () => {
+    wrap.resetDirectoryCache();
+    const kinds = await wrap.fetchSupported();
+    const sol = wrap.solanaKinds(kinds);
+    const token = sol.find((k) => k.extra.asset === W2);
+    assert.ok(token, 'live directory must list FXYk…');
+    assert.strictEqual(token.extra.symbol, 'wTOKENx2');
+    assert.ok(!sol.some((k) => k.extra.asset === DRAINED), 'drained mint must be hidden');
+    assert.strictEqual(token.extra.acquire.authorityBump, 254);
+    assert.strictEqual(token.extra.acquire.program, wrap.WRAP_PROGRAM);
+  });
 
-check('solana filter drops eip155', () => {
-  const sol = pay.solanaAccepts(liveShape);
-  assert.ok(sol.every((a) => a.network.startsWith('solana:')));
-  assert.strictEqual(sol.length, 3);
-});
+  await check('drained mint is never a rail', () => {
+    const sol = pay.solanaAccepts(live402);
+    assert.ok(sol.every((a) => a.asset !== DRAINED));
+    assert.strictEqual(wrap.acquireForMint(fixtureKinds, DRAINED), null);
+  });
 
-check('USDC button maps to the yUSDCx accept via extra.symbol, not accepts[0] luck', () => {
-  const accept = pay.findAcceptForRail(liveShape, 'USDC');
-  assert.ok(accept);
-  assert.strictEqual(accept.asset, Y);
-  assert.strictEqual(pay.displaySymbol(accept), 'USDC');
-});
+  await check('FXYk displays as TOKEN, never wTOKENx', () => {
+    assert.strictEqual(pay.displaySymbol(live402[2]), 'TOKEN');
+    assert.strictEqual(wrap.userLabelFor('wTOKENx', W2), 'TOKEN');
+    assert.strictEqual(wrap.userLabelFor('wTOKENx2', W2), 'TOKEN');
+    assert.doesNotMatch(pay.displaySymbol(live402[2]), /wTOKEN/);
+  });
 
-check('TOKEN button maps to the live wTOKENx row (FXYk), not the documented Bo7x mint', () => {
-  const accept = pay.findAcceptForRail(liveShape, 'TOKEN');
-  assert.ok(accept);
-  assert.strictEqual(accept.asset, W_LIVE);
-  assert.strictEqual(pay.displaySymbol(accept), 'TOKEN');
-});
+  await check('yUSDCx / wLEOSx display as USDC / LEOS', () => {
+    assert.strictEqual(pay.displaySymbol(live402[0]), 'USDC');
+    assert.strictEqual(pay.displaySymbol(live402[3]), 'LEOS');
+  });
 
-check('TOKEN button also matches the documented Bo7x twin if that is what 402 quotes', () => {
-  const shape = [row(Y, 1, 'yUSDCx'), row(W_DOC, 50, 'wTOKENx')];
-  const accept = pay.findAcceptForRail(shape, 'TOKEN');
-  assert.strictEqual(accept.asset, W_DOC);
-});
+  await check('stripTwinHomework hides plumbing', () => {
+    const s = wrap.stripTwinHomework('pay with wTOKENx2 then yUSDCx Bo7xBF7SY8EyUBPUxRP66SFafxoPf2n5uqiLjbxEebx9');
+    assert.doesNotMatch(s, TWIN_RE);
+    assert.doesNotMatch(s, DRAIN_RE);
+  });
 
-check('LEOS button maps only when a solana LEOS row exists', () => {
-  assert.strictEqual(pay.findAcceptForRail(liveShape, 'LEOS').asset, L);
-  assert.strictEqual(pay.findAcceptForRail(liveShape.slice(0, 3), 'LEOS'), null);
-});
+  await check('TOKEN holding picks the live twin row, not yUSDCx', () => {
+    const plan = pay.pickPayablePlan(live402, { [TOKEN]: '999999999' }, fixtureKinds);
+    assert.strictEqual(plan.ok, true);
+    assert.strictEqual(plan.accept.asset, W2);
+    assert.ok(plan.wrap);
+    assert.strictEqual(plan.wrap.pool.authorityBump, 254);
+    assert.strictEqual(plan.label, 'TOKEN');
+  });
 
-check('TOKEN button + TOKEN twin covering picks that row, not the first Solana row', () => {
-  const r = pay.pickPayableRail(liveShape, { [W_LIVE]: '32316451' }, 'TOKEN');
-  assert.strictEqual(r.ok, true);
-  assert.strictEqual(r.accept.asset, W_LIVE);
-  assert.notStrictEqual(r.accept.asset, Y);
-});
+  await check('already holding enough wTOKENx2 pays without wrap', () => {
+    const plan = pay.pickPayablePlan(live402, { [W2]: '20109289' }, fixtureKinds);
+    assert.strictEqual(plan.ok, true);
+    assert.strictEqual(plan.accept.asset, W2);
+    assert.strictEqual(plan.wrap, null);
+  });
 
-check('USDC button + USDC twin covering picks USDC', () => {
-  const r = pay.pickPayableRail(liveShape, { [Y]: '7027' }, 'USDC');
-  assert.strictEqual(r.ok, true);
-  assert.strictEqual(r.accept.asset, Y);
-  assert.strictEqual(pay.displaySymbol(r.accept), 'USDC');
-});
+  await check('plain USDC plans a USDC wrap, not a guess at accepts[0] luck', () => {
+    const plan = pay.pickPayablePlan(live402, { [USDC]: '1000000000' }, fixtureKinds);
+    assert.strictEqual(plan.ok, true);
+    assert.strictEqual(plan.accept.asset, Y);
+    assert.ok(plan.wrap);
+    assert.strictEqual(plan.wrap.from, 'USDC');
+  });
 
-check('USDC button does not silently fall through to TOKEN when USDC twin is empty', () => {
-  const r = pay.pickPayableRail(liveShape, { [W_LIVE]: '99999999' }, 'USDC');
-  assert.strictEqual(r.ok, false);
-  assert.match(r.reason, /Fund this wallet with USDC \/ TOKEN \/ LEOS/);
-  assert.doesNotMatch(r.reason, TWIN_RE);
-});
+  await check('empty wallet steers without twin names', () => {
+    const plan = pay.pickPayablePlan(live402, {}, fixtureKinds);
+    assert.strictEqual(plan.ok, false);
+    assert.match(plan.reason, /Add USDC, TOKEN, or LEOS/);
+    assert.doesNotMatch(plan.reason, TWIN_RE);
+    assert.doesNotMatch(plan.reason, DRAIN_RE);
+  });
 
-check('plain USDC does not silently build the USDC rail (builder does not wrap)', () => {
-  const r = pay.pickPayableRail(liveShape, { [USDC]: '1000000000' }, 'USDC');
-  assert.strictEqual(r.ok, false);
-  assert.strictEqual(r.code, 'unwrapped-only');
-  assert.strictEqual(r.reason, 'Fund this wallet with USDC / TOKEN / LEOS');
-  assert.doesNotMatch(r.reason, TWIN_RE);
-});
+  await check('eip155-only 402 is rejected', () => {
+    const plan = pay.pickPayablePlan([live402[1]], { [USDC]: '9' }, fixtureKinds);
+    assert.strictEqual(plan.ok, false);
+    assert.strictEqual(plan.code, 'no-solana');
+  });
 
-check('plain TOKEN does not pick a solana row', () => {
-  const r = pay.pickPayableRail(liveShape, { [TOKEN]: '1000000000' }, 'TOKEN');
-  assert.strictEqual(r.ok, false);
-  assert.strictEqual(r.code, 'unwrapped-only');
-  assert.doesNotMatch(r.reason, TWIN_RE);
-});
+  await check('wTOKENx2 wrap is nine accounts, bump 254', () => {
+    const pool = wrap.resolvePool(fixtureKinds, W2);
+    assert.ok(pool);
+    assert.strictEqual(pool.authorityBump, 254);
+    assert.strictEqual(pool.underlying, TOKEN);
+    assert.strictEqual(pool.program, wrap.WRAP_PROGRAM);
+    const ix = wrap.buildWrapInstruction(pool, OWNER, 1000n);
+    assert.strictEqual(ix.accountCount, 9);
+    assert.strictEqual(ix.keys.length, 9);
+    assert.strictEqual(ix.bump, 254);
+    assert.strictEqual(ix.data[0], 1);
+    assert.strictEqual(ix.data[ix.data.length - 1], 254);
+    assert.strictEqual(ix.keys[0].pubkey, pool.escrow);
+    assert.strictEqual(ix.keys[1].pubkey, W2);
+    assert.strictEqual(ix.keys[5].isWritable, true);
+    assert.strictEqual(ix.keys[6].pubkey, OWNER);
+    assert.strictEqual(ix.keys[6].isSigner, true);
+    assert.strictEqual(ix.keys[8].pubkey, pool.underlyingProgram);
+  });
 
-check('plain LEOS underlying does not pay the LEOS rail', () => {
-  const r = pay.pickPayableRail(liveShape, { [LEOS]: '1000000000' }, 'LEOS');
-  assert.strictEqual(r.ok, false);
-  assert.doesNotMatch(r.reason, TWIN_RE);
-});
+  await check('wrap compile produces a legacy unsigned tx', () => {
+    const pool = wrap.resolvePool(fixtureKinds, W2);
+    const built = wrap.compileWrapTransaction(pool, OWNER, 50n, BLOCKHASH, OWNER);
+    assert.ok(built.transaction);
+    assert.strictEqual(built.wrap.accountCount, 9);
+    const raw = Buffer.from(built.transaction, 'base64');
+    assert.ok(raw.length > 100);
+  });
 
-check('empty wallet steers with fund copy, no twin names', () => {
-  const r = pay.pickPayableRail(liveShape, {}, 'USDC');
-  assert.strictEqual(r.ok, false);
-  assert.strictEqual(r.code, 'no-balance');
-  assert.match(r.reason, /Fund this wallet with USDC \/ TOKEN/);
-  assert.doesNotMatch(r.reason, TWIN_RE);
-});
+  await check('ATA and mint-authority PDA match on-chain wrap-nav accounts', () => {
+    const ata = solana.getAssociatedTokenAddress(W2, OWNER, solana.TOKEN_2022_PROGRAM);
+    assert.strictEqual(ata, '9oYTiFzWtXMnjjXzm4NtKRUaWnLmyaDL2hpHxWkMHkGA');
+    const seed = Buffer.from('mint_authority');
+    const derived = solana.findProgramAddress([seed, solana.pubkeyBytes(W2)], wrap.WRAP_PROGRAM);
+    assert.strictEqual(derived.address, '2SFdjJoRyWfXvXghAjahDgmaZPrAr5WqqCr8KquAtZVM');
+    assert.strictEqual(derived.bump, 254);
+  });
 
-check('no button selected is a hard fail (no first-row default)', () => {
-  const r = pay.pickPayableRail(liveShape, { [Y]: '999999' }, null);
-  assert.strictEqual(r.ok, false);
-  assert.strictEqual(r.code, 'need-rail');
-});
+  await check('encodePayment fills the envelope', () => {
+    const b64 = pay.encodePayment({
+      x402Version: 1,
+      scheme: 'exact',
+      network: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+      payload: { transaction: '<replace>' }
+    }, 'SIGNEDTX');
+    const decoded = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
+    assert.strictEqual(decoded.payload.transaction, 'SIGNEDTX');
+  });
 
-check('missing balances object is a hard fail (no guess)', () => {
-  const r = pay.pickPayableRail(liveShape, null, 'USDC');
-  assert.strictEqual(r.ok, false);
-  assert.strictEqual(r.code, 'no-balances');
-});
+  await check('bundled UI never shows bind / twin / drained homework', () => {
+    const html = fs.readFileSync(path.join(__dirname, '..', 'www/app/index.html'), 'utf8');
+    assert.doesNotMatch(html, BIND_RE);
+    assert.doesNotMatch(html, /wTOKENx/);
+    assert.doesNotMatch(html, DRAIN_RE);
+    assert.doesNotMatch(html, /:8402/);
+    assert.doesNotMatch(html, /yUSDCx|wLEOSx/);
+    const js = fs.readFileSync(path.join(__dirname, '..', 'www/app/app.js'), 'utf8');
+    assert.doesNotMatch(js, DRAIN_RE);
+    assert.doesNotMatch(js, /:8402/);
+    assert.doesNotMatch(js, /wTOKENx|yUSDCx|wLEOSx/);
+  });
 
-check('eip155-only 402 is rejected even if the button is USDC', () => {
-  const r = pay.pickPayableRail([liveShape[1]], { [USDC]: '999' }, 'USDC');
-  assert.strictEqual(r.ok, false);
-  assert.strictEqual(r.code, 'no-solana');
-});
+  await check('depositForShares adds genesis liquidity when empty', () => {
+    assert.strictEqual(wrap.depositForShares(10n, 0n, 0n), 1010n);
+  });
 
-check('LEOS not offered when no solana LEOS row', () => {
-  const r = pay.pickPayableRail(liveShape.slice(0, 3), { [L]: '999' }, 'LEOS');
-  assert.strictEqual(r.ok, false);
-  assert.strictEqual(r.code, 'not-offered');
-  assert.match(r.reason, /LEOS is not offered/);
-});
+  console.log('\n' + passed + ' checks passed');
+}
 
-check('LEOS button + LEOS twin covering picks that row', () => {
-  const r = pay.pickPayableRail(liveShape, { [L]: '46522762707' }, 'LEOS');
-  assert.strictEqual(r.ok, true);
-  assert.strictEqual(r.accept.asset, L);
-  assert.strictEqual(pay.displaySymbol(r.accept), 'LEOS');
+run().catch((e) => {
+  console.error(e);
+  process.exit(1);
 });
-
-check('insufficient USDC twin with leftover dust is not payable', () => {
-  const r = pay.pickPayableRail(liveShape, { [Y]: '1' }, 'USDC');
-  assert.strictEqual(r.ok, false);
-});
-
-check('encodePayment fills the envelope payload', () => {
-  const b64 = pay.encodePayment({
-    x402Version: 1,
-    scheme: 'exact',
-    network: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
-    payload: { transaction: '<replace>' }
-  }, 'SIGNEDTX');
-  const decoded = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
-  assert.strictEqual(decoded.payload.transaction, 'SIGNEDTX');
-  assert.strictEqual(decoded.x402Version, 1);
-});
-
-console.log('\n' + passed + ' checks passed');
