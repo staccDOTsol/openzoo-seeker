@@ -21,6 +21,6 @@ On a real device:
 npm test
 ```
 
-That covers: live `/supported` rails, hide the drained mint, label the live TOKEN twin without saying the old name, nine-account wrap + bump 254, ez-mode pick from what the wallet holds, no bind / twin homework in the UI, address copy/paste, 402 persist + pay/build retry after a WebView `Load failed`, and CSP `connect-src` for the gateway, accrue, and Solana RPCs.
+That covers: live `/supported` rails, hide the drained mint, label the live TOKEN twin without saying the old name, nine-account wrap + bump 254, ez-mode pick from what the wallet holds, no bind / twin homework in the UI, address copy/paste, 402 persist + pay/build retry after a WebView `Load failed`, CSP `connect-src` for the gateway, accrue, and Solana RPCs, chat-history spill (short tail + context id, never `x-hrr-context` with the full thread), and HUD savings as `directUsd / spentUsd`.
 
 Do not expect a guest mode. Chat is paid from the connected wallet.

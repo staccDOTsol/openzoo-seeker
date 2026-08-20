@@ -22,7 +22,7 @@ This repository is a fork of [FreeSolDev/CordovaSeeker](https://github.com/FreeS
 
 The shell owns the wallet. The UI never sees a key. There is no local `:8402` sidecar and no iframe of `openzoo.fun`.
 
-Attach is abstract: you drop files, a folder, or notes. The app keeps a corpus with that thread behind the scenes. The screen never shows context ids, bind routes, or wrap-twin homework.
+Attach is abstract: you drop files, a folder, or notes. The app keeps a corpus with that thread behind the scenes. Chat uses the same Claude / `npx openzoo claude` spill path: a context id per thread, older turns bound once, later calls send a short tail plus that id. Completions never pair `x-hrr-context` with the growing messages array. The screen never shows context ids, bind routes, or wrap-twin homework. HUD savings is `directUsd / spentUsd`, not a running sum of `savesVsDirect`.
 
 ## Wallet bridge
 

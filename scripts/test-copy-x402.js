@@ -232,8 +232,24 @@ async function run() {
     assert.match(html, /data-page="openzoo-grokui"/);
     assert.match(appJs, /attachQuietly/);
     assert.match(appJs, /\/v1\/hrr\/bind/);
+    assert.match(appJs, /planChatSpill/);
+    assert.match(html, /spill\.js/);
     assert.doesNotMatch(html, /context_id|bind hash/i);
     assert.strictEqual(wrap.WTOKENX2, 'FXYkwMtfKpA174rp8ixVeiGs5TYGaBsYRrHE3KrR449B');
+  });
+
+  await check('chat completions spill the prefix instead of dumping the thread', () => {
+    const appJs = read('www/app/app.js');
+    const spillJs = read('www/app/spill.js');
+    assert.match(spillJs, /KEEP_TAIL = 3/);
+    assert.match(spillJs, /x-hrr-context must not travel with the full messages array/);
+    assert.match(appJs, /assertNoFullDump/);
+    assert.match(appJs, /planned\.messages/);
+    assert.doesNotMatch(appJs, /savesVsDirect/);
+    assert.match(appJs, /hudSavingX/);
+    assert.doesNotMatch(appJs, /SPAWN|worktree/i);
+    assert.match(appJs, /OpenZooPay\.paidFetch/);
+    assert.match(read('www/index.html'), /MWA\.signTransaction/);
   });
 
   console.log('\n' + passed + ' copy/x402 checks passed');
