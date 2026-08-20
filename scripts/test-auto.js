@@ -106,11 +106,10 @@ async function run() {
 
   await check('chat canvas still paints message content, not tool dumps', () => {
     const app = read('www/app/app.js');
-    const html = read('www/app/index.html');
     assert.match(app, /ch\.message && ch\.message\.content/);
     assert.match(app, /bubble\.textContent = m\.content/);
+    assert.match(app, /meta\.className = 'meta'/);
     assert.doesNotMatch(app, /tool_calls|tool_use|function_call/);
-    assert.match(html, /class="meta"/);
   });
 
   console.log('\n' + passed + ' auto checks passed');
