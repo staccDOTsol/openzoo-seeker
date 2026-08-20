@@ -1,20 +1,23 @@
 {
-  "name": "com.example.cordovaseeker",
-  "displayName": "CordovaSeeker",
+  "name": "fun.openzoo.seeker",
+  "displayName": "OpenZoo",
   "version": "1.0.0",
-  "description": "Open-source template for building Solana Seeker games with plain web tech \u2014 Cordova shell + native Mobile Wallet Adapter plugin, no Unity required",
+  "description": "OpenZoo for Solana Seeker — pay-per-call chat via x402 and native Mobile Wallet Adapter",
   "main": "index.js",
   "scripts": {
     "build": "cordova build android",
     "build:release": "cordova build android --release",
     "run": "cordova run android",
     "clean": "cordova clean android",
-    "requirements": "cordova requirements android"
+    "requirements": "cordova requirements android",
+    "test:rails": "node scripts/test-rails.js"
   },
   "keywords": [
     "ecosystem:cordova",
     "solana",
     "seeker",
+    "openzoo",
+    "x402",
     "mobile-wallet-adapter"
   ],
   "license": "MIT",

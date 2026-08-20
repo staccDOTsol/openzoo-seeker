@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en" data-page="openzoo-gui">
+<head>
+<meta charset="utf-8" data-meta="charset">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy"
+  content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://x402-tokens.fly.dev https://api.mainnet-beta.solana.com https://solana-rpc.publicnode.com; img-src * data:; style-src 'self' 'unsafe-inline';">
+<title>openzoo</title>
+<style data-component="styles">
+  :root {
+    --paper: #faf6ee; --card: #ffffff; --ink: #22271f; --muted: #7a806f;
+    --leaf: #3e7c4f; --leaf-soft: #e3efe0; --line: #e6e0d2; --accent-warm: #f3e8d2;
+    --warn: #8a4b12; --warn-bg: #fff3d6;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--paper); color: var(--ink);
+    font: 15px/1.55 ui-rounded, "SF Pro Rounded", -apple-system, "Segoe UI", sans-serif;
+    display: flex; flex-direction: column;
+    height: 100vh; height: 100dvh;
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+  header { display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+    border-bottom: 1px solid var(--line); background: var(--card); flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: -.2px; }
+  select, button, textarea, input { font: inherit; color: inherit; }
+  #model { border: 1px solid var(--line); border-radius: 12px; padding: 6px 10px;
+    background: var(--paper); flex: 1 1 160px; min-width: 0; }
+  .chip { font-size: 11px; color: var(--muted); background: var(--paper);
+    border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; white-space: nowrap; }
+  .chip.on { color: var(--leaf); border-color: var(--leaf); background: var(--leaf-soft); }
+  #chat { flex: 1; overflow-y: auto; padding: 16px 0; -webkit-overflow-scrolling: touch; }
+  .row { max-width: 780px; margin: 0 auto 14px; padding: 0 14px; display: flex; }
+  .bubble { padding: 10px 14px; border-radius: 16px; width: fit-content;
+    max-width: 100%; white-space: pre-wrap; overflow-wrap: break-word; }
+  [data-role="bubble-wrap"] { min-width: 0; max-width: min(92%, 640px);
+    display: flex; flex-direction: column; }
+  .row[data-row="user"] [data-role="bubble-wrap"] { margin-left: auto; align-items: flex-end; }
+  .me { background: var(--ink); color: var(--paper); border-bottom-right-radius: 4px; }
+  .zoo { background: var(--card); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+  .meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  footer { border-top: 1px solid var(--line); background: var(--card); padding: 10px 12px; }
+  .composer { max-width: 780px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
+  textarea { flex: 1; resize: none; border: 1px solid var(--line); border-radius: 14px;
+    padding: 10px 14px; background: var(--paper); min-height: 44px; max-height: 140px; outline: none; }
+  textarea:focus { border-color: var(--leaf); }
+  .send { background: var(--leaf); color: #fff; border: 0; border-radius: 14px;
+    padding: 10px 16px; font-weight: 700; cursor: pointer; }
+  .send:active { transform: scale(.97); }
+  .ticker { max-width: 780px; margin: 8px auto 0; font-size: 11px; color: var(--muted);
+    display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; text-align: center; }
+  #drawer { display: none; border-bottom: 1px solid var(--line); background: var(--accent-warm); padding: 12px 14px; }
+  #drawer.open { display: block; }
+  .drawer-inner { max-width: 780px; margin: 0 auto; }
+  .drawer-inner textarea { width: 100%; background: #fffdf7; min-height: 90px; }
+  .tiny { font-size: 12px; color: var(--muted); }
+  .ghost { background: none; border: 1px solid var(--line); border-radius: 12px; padding: 6px 10px; cursor: pointer; }
+  .ghost:hover { border-color: var(--leaf); color: var(--leaf); }
+  #banner { display: none; margin: 0; padding: 10px 14px; font-size: 13px;
+    background: var(--warn-bg); color: var(--warn); border-bottom: 1px solid #ead8a6; }
+  #banner.show { display: block; }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .rails { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .rail { background: var(--paper); border: 1px solid var(--line); border-radius: 12px;
+    padding: 6px 10px; cursor: pointer; display: flex; flex-direction: column; align-items: flex-start; min-width: 72px; }
+  .rail .lbl { font-weight: 700; font-size: 13px; }
+  .rail .ca { font-size: 10px; color: var(--muted); }
+  .rail.on { color: var(--leaf); border-color: var(--leaf); background: var(--leaf-soft); }
+</style>
+</head>
+<body data-component="app">
+<header data-component="topbar">
+  <span data-role="logo" style="font-size:22px">🦓</span>
+  <h1 data-role="title">openzoo</h1>
+  <span class="chip" id="walletChip" data-component="wallet-chip">no wallet</span>
+  <span class="chip" id="netChip" data-component="net-chip">connecting…</span>
+  <button class="ghost" id="leaveBtn" data-component="leave-button" title="back to shell">leave</button>
+  <input id="model" list="modelList" data-component="model-picker" placeholder="🔎 pick an animal…">
+  <datalist id="modelList" data-component="model-datalist"></datalist>
+  <div class="actions" data-role="header-actions">
+    <button class="ghost" id="brainBtn" data-component="brain-toggle">🧠 bind</button>
+    <button class="ghost" id="newBtn" data-component="new-chat" title="fresh session">✨ new</button>
+    <span class="chip" id="ctxChip" data-component="ctx-chip" style="display:none"></span>
+    <div class="rails" id="rails" data-component="rail-picker"></div>
+  </div>
+</header>
+
+<div id="banner" data-component="pay-banner"></div>
+
+<div id="drawer" data-component="brain-drawer">
+  <div class="drawer-inner" data-role="drawer-inner">
+    <p class="tiny" data-role="drawer-hint" style="margin:0 0 8px">Paste anything big — docs, a codebase, a book. The zoo binds it once
+      and later questions retrieve just the relevant slices. Bind is chat+stats only on this phone — no local files, no shell.</p>
+    <textarea id="corpus" data-component="corpus-input" placeholder="paste your corpus here… (or drop a .txt/.md file on this box)"></textarea>
+    <div style="margin-top:8px; display:flex; gap:10px; align-items:center" data-role="drawer-actions">
+      <button class="send" id="bindBtn" data-component="bind-button">bind it</button>
+      <span class="tiny" id="bindStatus" data-role="bind-status"></span>
+    </div>
+  </div>
+</div>
+
+<div id="chat" data-component="chat-scroll">
+  <div class="row" data-row="welcome"><div class="bubble zoo" data-role="welcome-bubble">welcome to the zoo 🦁 — pick a model, say anything.
+paste a corpus with 🧠 and ask against it. this phone build is chat, bind, and stats only.
+pay with USDC / TOKEN / LEOS from the connected wallet.</div></div>
+</div>
+
+<footer data-component="composer-bar">
+  <div class="composer" data-role="composer">
+    <textarea id="box" data-component="message-input" placeholder="say something to the animals…" rows="1"></textarea>
+    <button class="send" id="sendBtn" data-component="send-button">send</button>
+  </div>
+  <div class="ticker" data-component="ticker">
+    <span id="spent" data-role="spent-ticker">this session: $0.0000</span>
+    <span id="saved" data-role="saved-ticker"></span>
+    <span id="calls" data-role="calls-ticker"></span>
+    <span id="stats" data-role="stats-ticker"></span>
+  </div>
+</footer>
+
+<script src="pay.js"></script>
+<script data-component="app-script">
+const $ = (id) => document.getElementById(id);
+const SKEY = "openzoo.seeker.session.v1";
+const GATEWAY = (window.OpenZooPay && OpenZooPay.GATEWAY) || "https://x402-tokens.fly.dev";
+const state = Object.assign(
+  { messages: [], ctx: null, spent: 0, saved: 0, calls: 0, model: "" },
+  JSON.parse(localStorage.getItem(SKEY) || "{}"),
+  { busy: false },
+);
+const wallet = { address: null, method: null };
+const pendingSigns = new Map();
+let signSeq = 1;
+let preferredRail = "USDC";
+
+function shortMint(mint) {
+  return mint.slice(0, 4) + "…" + mint.slice(-4);
+}
+
+function renderRails() {
+  const host = $("rails");
+  if (!host) return;
+  host.innerHTML = "";
+  ["USDC", "TOKEN", "LEOS"].forEach((label) => {
+    const spec = OpenZooPay.RAILS[label];
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "rail" + (preferredRail === label ? " on" : "");
+    b.setAttribute("data-rail", label);
+    b.setAttribute("data-component", "openzoo-pay-with-" + label.toLowerCase());
+    b.title = "pay with " + label + " · mint " + spec.underlying;
+    b.innerHTML = '<span class="lbl">' + label + '</span><span class="ca">' + shortMint(spec.underlying) + "</span>";
+    b.onclick = () => {
+      preferredRail = label;
+      renderRails();
+    };
+    host.appendChild(b);
+  });
+}
+
+function persist() {
+  const { messages, ctx, spent, saved, calls } = state;
+  localStorage.setItem(SKEY, JSON.stringify({ messages, ctx, spent, saved, calls, model: $("model")?.value || "" }));
+}
+
+function setBanner(msg) {
+  const el = $("banner");
+  if (!msg) { el.classList.remove("show"); el.textContent = ""; return; }
+  el.textContent = msg;
+  el.classList.add("show");
+}
+
+function setWalletChip() {
+  const el = $("walletChip");
+  if (!wallet.address) {
+    el.textContent = "no wallet";
+    el.classList.remove("on");
+    return;
+  }
+  el.textContent = wallet.address.slice(0, 4) + "…" + wallet.address.slice(-4);
+  el.classList.add("on");
+}
+
+function signTransaction(txB64) {
+  return new Promise((resolve, reject) => {
+    const id = signSeq++;
+    const t = setTimeout(() => {
+      pendingSigns.delete(id);
+      reject(new Error("wallet sign timed out — approve the transaction in Phantom / Seeker Vault"));
+    }, 90000);
+    pendingSigns.set(id, {
+      resolve: (signed) => { clearTimeout(t); resolve(signed); },
+      reject: (err) => { clearTimeout(t); reject(err); },
+    });
+    parent.postMessage({ type: "wallet-sign-transaction", id, transaction: txB64 }, "*");
+  });
+}
+
+function payCtx() {
+  return {
+    payer: wallet.address,
+    signTransaction,
+    preferredRail,
+    onStatus: setBanner,
+  };
+}
+
+window.addEventListener("message", (event) => {
+  if (event.source !== window.parent) return;
+  const data = event.data;
+  if (!data || !data.type) return;
+  if (data.type === "wallet-connected") {
+    wallet.address = data.address;
+    wallet.method = data.method;
+    setWalletChip();
+    setBanner("");
+  }
+  if (data.type === "wallet-disconnected") {
+    wallet.address = null;
+    wallet.method = null;
+    setWalletChip();
+  }
+  if (data.type === "wallet-sign-transaction-response") {
+    const p = pendingSigns.get(data.id);
+    if (!p) return;
+    pendingSigns.delete(data.id);
+    if (data.error) p.reject(new Error(data.error));
+    else p.resolve(data.signedTransaction);
+  }
+});
+parent.postMessage({ type: "wallet-request-info" }, "*");
+
+const ANIMAL = (id) => id.startsWith("anthropic") ? "🦒" : id.startsWith("openai") ? "🦉"
+  : id.startsWith("deepseek") ? "🐋" : id.startsWith("x-ai") ? "🦊" : id.startsWith("google") ? "🐦"
+  : id.startsWith("meta") ? "🦙" : id.startsWith("mistral") ? "🐈" : id.startsWith("qwen") ? "🐼" : "🐾";
+
+async function loadModels() {
+  try {
+    const r = await fetch(GATEWAY + "/v1/models");
+    const d = await r.json();
+    const models = (d.data || []).filter((m) => !m.id.startsWith("~") && !m.id.includes(":batch"));
+    models.sort((a, b) => a.id.localeCompare(b.id));
+    const dl = $("modelList");
+    dl.innerHTML = "";
+    for (const m of models) {
+      const o = document.createElement("option");
+      o.value = m.id;
+      o.setAttribute("data-option", m.id);
+      const inM = m.pricing?.prompt ? (1e6 * m.pricing.prompt).toFixed(2) : "?";
+      o.label = `${ANIMAL(m.id)} $${inM}/M`;
+      dl.appendChild(o);
+    }
+    if (!$("model").value) {
+      const pick = models.find((m) => m.id.includes("deepseek-v4-pro")) || models[0];
+      if (pick) $("model").value = pick.id;
+    }
+    $("netChip").textContent = `${models.length} animals`;
+    $("netChip").classList.add("on");
+  } catch { $("netChip").textContent = "gateway unreachable"; }
+}
+
+async function loadStats() {
+  try {
+    const r = await fetch(GATEWAY + "/v1/stats");
+    const d = await r.json();
+    const t = d.today || {};
+    const usd = typeof t.usdPaid === "number" ? t.usdPaid.toFixed(2) : "?";
+    $("stats").textContent = `zoo today: ${t.paid ?? "?"} paid · $${usd}`;
+  } catch { /* stats are optional */ }
+}
+
+function bubble(text, mine, meta) {
+  const row = document.createElement("div");
+  row.className = "row";
+  row.setAttribute("data-row", mine ? "user" : "assistant");
+  const wrap = document.createElement("div");
+  wrap.setAttribute("data-role", "bubble-wrap");
+  const b = document.createElement("div");
+  b.className = `bubble ${mine ? "me" : "zoo"}`;
+  b.setAttribute("data-role", "bubble");
+  b.textContent = text;
+  wrap.appendChild(b);
+  if (meta) {
+    const m = document.createElement("div");
+    m.className = "meta";
+    m.setAttribute("data-role", "bubble-meta");
+    m.textContent = meta;
+    wrap.appendChild(m);
+  }
+  row.appendChild(wrap);
+  $("chat").appendChild(row);
+  $("chat").scrollTop = $("chat").scrollHeight;
+  return b;
+}
+
+async function send() {
+  const text = $("box").value.trim();
+  if (!text || state.busy) return;
+  if (!wallet.address) {
+    setBanner("CONNECT a wallet on the shell first — chat is paid from your Solana wallet.");
+    return;
+  }
+  state.busy = true;
+  $("box").value = "";
+  bubble(text, true);
+  state.messages.push({ role: "user", content: text });
+  const thinking = bubble("…", false);
+  try {
+    const headers = { "content-type": "application/json" };
+    if (state.ctx) headers["x-hrr-context"] = state.ctx;
+    const r = await OpenZooPay.paidFetch(GATEWAY + "/v1/chat/completions", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: $("model").value,
+        messages: state.messages,
+        max_tokens: /deepseek|grok|thinking|fable|sonnet-5|-r1|reason/i.test($("model").value) ? 16384 : 4096,
+      }),
+    }, payCtx());
+    const d = await r.json();
+    if (!r.ok) {
+      const msg = d.error?.message || d.error || d.message || ("HTTP " + r.status);
+      thinking.textContent = "the zoo hiccuped: " + msg;
+      setBanner(String(msg));
+      state.busy = false;
+      return;
+    }
+    setBanner("");
+    const ch = d.choices?.[0];
+    let content = ch?.message?.content || "";
+    if (!content && ch?.finish_reason === "length") {
+      content = "🦥 the animal thought so hard it ran out of room before saying anything. try again — the cage just got bigger.";
+    } else if (!content) {
+      content = d.error?.message || "🦉 the zoo returned something unusual: " + JSON.stringify(d).slice(0, 200);
+    }
+    thinking.textContent = content;
+    state.messages.push({ role: "assistant", content });
+    const x = d.x402 || {};
+    state.calls += 1;
+    if (typeof x.billedUsd === "number") state.spent += x.billedUsd;
+    if (typeof x.savesVsDirect === "number" && x.savesVsDirect > 0) state.saved += x.savesVsDirect;
+    const bits = [];
+    if (typeof x.billedUsd === "number") bits.push(`$${x.billedUsd.toFixed(4)}`);
+    if (x.lecore?.engaged) bits.push(`🧠 ${x.lecore.recalled ?? "?"} slices`);
+    if (bits.length) thinking.parentElement.querySelector("[data-role=bubble-meta]")?.remove(),
+      thinking.insertAdjacentHTML("afterend", `<div class="meta" data-role="bubble-meta">${bits.join(" · ")}</div>`);
+    $("spent").textContent = `this session: $${state.spent.toFixed(4)}`;
+    if (state.saved > 0) $("saved").textContent = `saved ~$${state.saved.toFixed(4)} vs direct 🎉`;
+    $("calls").textContent = `${state.calls} call${state.calls === 1 ? "" : "s"}`;
+    persist();
+    loadStats();
+  } catch (e) {
+    thinking.textContent = `the zoo hiccuped: ${e.message}`;
+    setBanner(e.message || String(e));
+  }
+  state.busy = false;
+}
+
+async function bind() {
+  const corpus = $("corpus").value;
+  if (!corpus.trim()) return;
+  $("bindStatus").textContent = "binding…";
+  try {
+    const r = await OpenZooPay.paidFetch(GATEWAY + "/v1/hrr/bind", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ corpus }),
+    }, payCtx());
+    const d = await r.json();
+    if (d.context_id) {
+      state.ctx = d.context_id;
+      $("bindStatus").textContent = `bound ${(corpus.length / 1000).toFixed(0)}k chars ✓`;
+      const chip = $("ctxChip");
+      chip.style.display = "";
+      chip.classList.add("on");
+      chip.textContent = `🧠 ${d.context_id.slice(0, 14)}… attached`;
+      $("drawer").classList.remove("open");
+      persist();
+      setBanner("");
+    } else {
+      $("bindStatus").textContent = d.error?.message || d.error || "bind failed";
+    }
+  } catch (e) { $("bindStatus").textContent = e.message; setBanner(e.message); }
+}
+
+function restore() {
+  for (const m of state.messages) bubble(m.content, m.role === "user");
+  $("spent").textContent = `this session: $${state.spent.toFixed(4)}`;
+  if (state.saved > 0) $("saved").textContent = `saved ~$${state.saved.toFixed(4)} vs direct 🎉`;
+  if (state.calls) $("calls").textContent = `${state.calls} call${state.calls === 1 ? "" : "s"}`;
+  if (state.model) $("model").value = state.model;
+  if (state.ctx) {
+    const chip = $("ctxChip");
+    chip.style.display = "";
+    chip.classList.add("on");
+    chip.textContent = `🧠 ${state.ctx.slice(0, 14)}… attached`;
+  }
+}
+restore();
+$("newBtn").onclick = () => {
+  localStorage.removeItem(SKEY);
+  location.reload();
+};
+$("sendBtn").onclick = send;
+$("box").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+});
+$("brainBtn").onclick = () => $("drawer").classList.toggle("open");
+$("bindBtn").onclick = bind;
+$("leaveBtn").onclick = () => parent.postMessage({ type: "wallet-exit" }, "*");
+$("corpus").addEventListener("drop", async (e) => {
+  e.preventDefault();
+  const f = e.dataTransfer?.files?.[0];
+  if (f) $("corpus").value = await f.text();
+});
+$("corpus").addEventListener("dragover", (e) => e.preventDefault());
+renderRails();
+loadModels();
+loadStats();
+</script>
+</body>
+</html>

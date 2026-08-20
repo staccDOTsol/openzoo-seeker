@@ -1,17 +1,21 @@
 <?xml version='1.0' encoding='utf-8'?>
-<widget id="com.example.cordovaseeker" version="1.0.0" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0">
-    <name>CordovaSeeker</name>
-    <description>Open-source Seeker game template — Cordova + native Mobile Wallet Adapter, no Unity required</description>
-    <author href="https://github.com/your-org/cordovaseeker">
-        Your Name
+<widget id="fun.openzoo.seeker" version="1.0.0" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0">
+    <name>OpenZoo</name>
+    <description>OpenZoo for Solana Seeker — pay-per-call chat via x402 and Mobile Wallet Adapter</description>
+    <author href="https://github.com/staccDOTsol/openzoo-seeker">
+        staccDOTsol
     </author>
 
-    <!-- Local shell handles wallet, loads game in iframe -->
+    <!-- Local shell owns MWA; bundled chat UI lives in the iframe -->
     <content src="index.html" />
 
-    <!-- If you host your game remotely, add its domain here:
-    <allow-navigation href="https://yourgame.example.com/*" />
-    <access origin="https://yourgame.example.com" /> -->
+    <!-- Gateway + public Solana RPCs used by the iframe for chat/bind/stats and balance reads -->
+    <allow-navigation href="https://x402-tokens.fly.dev/*" />
+    <access origin="https://x402-tokens.fly.dev" />
+    <allow-navigation href="https://api.mainnet-beta.solana.com/*" />
+    <access origin="https://api.mainnet-beta.solana.com" />
+    <allow-navigation href="https://solana-rpc.publicnode.com/*" />
+    <access origin="https://solana-rpc.publicnode.com" />
 
     <!-- Open wallet / external links in system browser -->
     <allow-intent href="https://*/*" />
@@ -35,7 +39,7 @@
     <platform name="android">
         <preference name="AndroidWindowSplashScreenBackground" value="#0a0a18" />
         <preference name="AndroidPersistentFileLocation" value="Compatibility" />
-        <!-- Allow CDN imports (esm.sh) from file:// origin -->
+        <!-- Allow network from file:// origin (bundled iframe → gateway / RPC) -->
         <preference name="AndroidInsecureFileModeEnabled" value="true" />
         <!-- Immersive sticky hides nav + status bars -->
         <preference name="immersiveMode" value="true" />
@@ -46,7 +50,7 @@
         <!-- singleTask: relaunches (e.g. returning from the wallet app) reuse the existing activity instead of recreating it -->
         <preference name="AndroidLaunchMode" value="singleTask" />
 
-        <!-- Icons -->
+        <!-- Icons (generated from res/icon/src/token.jpg — keep) -->
         <icon density="ldpi" src="res/icon/android/ldpi.png" />
         <icon density="mdpi" src="res/icon/android/mdpi.png" />
         <icon density="hdpi" src="res/icon/android/hdpi.png" />
