@@ -18,6 +18,7 @@
   var modelIds = [];
   var Auto = window.OpenZooAuto;
   var AUTO_MODEL = (Auto && Auto.AUTO_MODEL) || 'openzoo/auto';
+  var Think = window.OpenZooThink;
 
   function $(id) { return document.getElementById(id); }
 
@@ -470,12 +471,38 @@
       return;
     }
     t.messages.forEach(function (m) {
+      if (Think) Think.normalizeMessage(m);
       var row = document.createElement('div');
       row.className = 'row ' + (m.role === 'user' ? 'user' : 'bot') + (m.pending ? ' pending' : '');
-      var bubble = document.createElement('div');
-      bubble.className = 'bubble';
-      bubble.textContent = m.content;
-      row.appendChild(bubble);
+      if (m.role !== 'user' && Think && Think.hasReasoning(m.reasoning)) {
+        var thinkBtn = document.createElement('button');
+        thinkBtn.type = 'button';
+        thinkBtn.className = 'think-row';
+        thinkBtn.setAttribute('data-component', 'think-row');
+        thinkBtn.setAttribute('aria-expanded', m.thinkOpen ? 'true' : 'false');
+        thinkBtn.textContent = Think.LABEL;
+        thinkBtn.addEventListener('click', function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          m.thinkOpen = !m.thinkOpen;
+          renderLog();
+        });
+        row.appendChild(thinkBtn);
+        if (m.thinkOpen) {
+          var thinkBody = document.createElement('div');
+          thinkBody.className = 'think-body';
+          thinkBody.setAttribute('data-component', 'think-body');
+          thinkBody.textContent = m.reasoning;
+          row.appendChild(thinkBody);
+        }
+      }
+      var showBubble = m.content || (m.pending && !(Think && Think.hasReasoning(m.reasoning)));
+      if (showBubble) {
+        var bubble = document.createElement('div');
+        bubble.className = 'bubble';
+        bubble.textContent = m.content || (m.pending ? '…' : '');
+        row.appendChild(bubble);
+      }
       if (m.meta) {
         var meta = document.createElement('div');
         meta.className = 'meta';
@@ -559,7 +586,14 @@
   function completedHistory(thread) {
     return thread.messages.filter(function (m, i) {
       return !(i === thread.messages.length - 1 && m.role === 'assistant' && (m.pending || m.content === '…'));
-    }).map(function (m) { return { role: m.role, content: m.content }; });
+    }).map(function (m) {
+      var copy = { role: m.role, content: m.content };
+      if (Think && m.role === 'assistant') {
+        var n = Think.split(m.content || '');
+        copy.content = n.content;
+      }
+      return copy;
+    });
   }
 
   function noteThreadReceipt(thread, x402) {
@@ -584,8 +618,37 @@
       if (!last.content || last.content === '…') last.content = String(patch.content);
       else last.content += String(patch.content);
     }
+    if (patch.reasoning != null) {
+      last.reasoning = patch.reasoning;
+      if (last.thinkOpen == null) last.thinkOpen = false;
+    }
+    if (patch.raw != null) last.raw = patch.raw;
+    if (Think) Think.normalizeMessage(last);
     if (patch.meta != null) last.meta = patch.meta;
     if (patch.pending != null) last.pending = patch.pending;
+    renderLog();
+    renderHud();
+  }
+
+  function ingestAssistant(thread, text, extra, opts) {
+    extra = extra || {};
+    opts = opts || {};
+    var last = thread.messages[thread.messages.length - 1];
+    if (!last || last.role !== 'assistant') return;
+    if (opts.replace || extra.replace) last.raw = text == null ? '' : String(text);
+    else if (text) last.raw = (last.raw || '') + String(text);
+    var parsed = Think
+      ? (extra.visible != null || extra.reasoning != null
+        ? { content: extra.visible == null ? last.content : extra.visible, reasoning: extra.reasoning || '' }
+        : Think.split(last.raw || last.content || ''))
+      : { content: last.raw || text || last.content || '', reasoning: extra.reasoning || '' };
+    if (Think) Think.applyToMessage(last, parsed, opts);
+    else {
+      last.content = parsed.content;
+      if (parsed.reasoning) last.reasoning = parsed.reasoning;
+    }
+    if (opts.pending != null) last.pending = opts.pending;
+    if (opts.meta != null) last.meta = opts.meta;
     renderLog();
     renderHud();
   }
@@ -636,8 +699,10 @@
     var reader = res.body.getReader();
     var dec = new TextDecoder();
     var buf = '';
-    var content = '';
     var last = {};
+    var stream = Think ? Think.createStream() : null;
+    var content = '';
+    var reasoning = '';
     while (true) {
       var chunk = await reader.read();
       if (chunk.done) break;
@@ -654,18 +719,40 @@
           last = ev;
           var delta = ev.choices && ev.choices[0] && ev.choices[0].delta;
           var piece = delta && delta.content;
-          if (piece) {
+          var snap = null;
+          if (stream) {
+            if (piece) stream.pushContent(piece);
+            var rdelta = Think.reasoningFrom(delta);
+            if (rdelta) stream.pushReasoning(rdelta);
+            snap = stream.snapshot();
+            content = snap.content;
+            reasoning = snap.reasoning;
+            if (onDelta && (piece || rdelta)) {
+              onDelta(piece || '', {
+                visible: snap.content,
+                reasoning: snap.reasoning,
+                visibleDelta: snap.visibleDelta,
+                replace: true
+              });
+            }
+          } else if (piece) {
             content += piece;
             if (onDelta) onDelta(piece);
           }
         } catch (_) {}
       }
     }
+    if (stream) {
+      var finished = stream.finish(last);
+      content = finished.content;
+      reasoning = finished.reasoning;
+    }
     if (!last.choices) last = { choices: [{ message: { content: content } }] };
     if (!last.choices[0]) last.choices[0] = {};
     if (!last.choices[0].message) last.choices[0].message = { content: content };
-    if (!last.choices[0].message.content) last.choices[0].message.content = content;
-    return { r: res, d: last, streamed: true, streamedContent: content };
+    last.choices[0].message.content = content;
+    if (reasoning) last.choices[0].message.reasoning = reasoning;
+    return { r: res, d: last, streamed: true, streamedContent: content, streamedReasoning: reasoning };
   }
 
   async function readCompletion(res, onDelta) {
@@ -675,7 +762,19 @@
       return readSSE(res, onDelta);
     }
     var d = await res.json();
-    return { r: res, d: d, streamed: false };
+    var parsed = Think ? Think.fromCompletion(d) : null;
+    if (parsed && d && d.choices && d.choices[0] && d.choices[0].message) {
+      d.choices[0].message.content = parsed.content;
+      if (parsed.reasoning) d.choices[0].message.reasoning = parsed.reasoning;
+      else delete d.choices[0].message.reasoning;
+    }
+    if (parsed && onDelta && parsed.content) onDelta(parsed.content, {
+      visible: parsed.content,
+      reasoning: parsed.reasoning,
+      replace: true
+    });
+    return { r: res, d: d, streamed: false, streamedContent: parsed ? parsed.content : undefined,
+      streamedReasoning: parsed ? parsed.reasoning : undefined };
   }
 
   async function postChat(thread, history, retried, opts) {
@@ -753,9 +852,14 @@
         if (!posted.r.ok) throw new Error('HTTP ' + posted.r.status);
         var ch = posted.d.choices && posted.d.choices[0];
         var content = (ch && ch.message && ch.message.content) || posted.streamedContent || '';
+        var parsed = Think ? Think.fromCompletion({
+          choices: [{ message: { content: content, reasoning: posted.streamedReasoning || (ch && ch.message && ch.message.reasoning) } }]
+        }) : { content: content, reasoning: posted.streamedReasoning || '' };
         noteThreadReceipt(thread, posted.d && posted.d.x402);
-        if (content && onDelta && !posted.streamed) onDelta(content);
-        return content;
+        if (parsed.content && onDelta && !posted.streamed) {
+          onDelta(parsed.content, { visible: parsed.content, reasoning: parsed.reasoning, replace: true });
+        }
+        return parsed.content;
       } catch (e) {
         if (e && (e.code === 'wrap-cancelled' || e.prompt || /wrap cancelled/i.test(e.message || ''))) throw e;
         if (window.OpenZooPay && OpenZooPay.isTransientNetworkError(e)) {
@@ -805,8 +909,7 @@
           content = await OpenZooRace.brainRace(
             history,
             function (delta, meta) {
-              if (meta && meta.replace) paintAssistant(t, { content: delta, replace: true, pending: true });
-              else paintAssistant(t, { content: delta, pending: true });
+              ingestAssistant(t, delta, meta || {}, { replace: !!(meta && meta.replace), pending: true });
             },
             t.memory,
             models,
@@ -821,7 +924,12 @@
         }
       }
       if (!racing) {
-        var posted = await postChat(t, history);
+        var posted = await postChat(t, history, false, {
+          stream: true,
+          onDelta: function (_piece, extra) {
+            ingestAssistant(t, _piece, extra || {}, { replace: true, pending: true });
+          }
+        });
         var r = posted.r;
         var d = posted.d;
         if (!r.ok) {
@@ -839,6 +947,12 @@
         lastX402 = d.x402 || {};
         lastRouted = Auto ? Auto.displayRouted(d, pinnedModel()) : (d.model && d.model !== AUTO_MODEL ? d.model : '');
         noteThreadReceipt(t, lastX402);
+        if (Think) {
+          var done = Think.fromCompletion(d);
+          if (!done.content && posted.streamedContent) done = Think.split(posted.streamedContent);
+          content = done.content || content;
+          ingestAssistant(t, content, { visible: content, reasoning: done.reasoning || posted.streamedReasoning || '' }, { replace: true, pending: true });
+        }
       }
       setBanner('');
       if (!content) content = racing ? OpenZooRace.RACE_EVERY_FAILED : 'the zoo returned an empty reply.';
@@ -853,7 +967,14 @@
       if (racing) bits.push('race ' + spend.raceNeed + '/' + spend.race);
       var last = t.messages[t.messages.length - 1];
       if (last && last.role === 'assistant') {
-        last.content = content;
+        var finalParsed = Think ? Think.split(content) : { content: content, reasoning: last.reasoning || '' };
+        last.content = finalParsed.content || content;
+        if (Think) {
+          Think.applyToMessage(last, {
+            content: last.content,
+            reasoning: Think.merge(finalParsed.reasoning, last.reasoning)
+          });
+        }
         last.meta = bits.join(' · ');
         last.pending = false;
       } else {

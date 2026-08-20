@@ -50,14 +50,19 @@
   #menuBtn { display: none; }
   #log { flex: 1; min-width: 0; overflow-y: auto; padding: 16px 16px 12px;
          display: flex; flex-direction: column; gap: 6px; -webkit-overflow-scrolling: touch; }
-  .row { display: flex; max-width: 86%; min-width: 0; margin: 2px 0; }
-  .row.user { align-self: flex-end; }
-  .row.bot { align-self: flex-start; }
+  .row { display: flex; flex-direction: column; max-width: 86%; min-width: 0; margin: 2px 0; }
+  .row.user { align-self: flex-end; align-items: flex-end; }
+  .row.bot { align-self: flex-start; align-items: flex-start; }
   .bubble { padding: 11px 16px; border-radius: 20px; white-space: pre-wrap; word-break: break-word;
             min-width: 0; max-width: 100%; }
   .row.user .bubble { background: #57575c; }
   .row.bot .bubble { background: #262626; }
   .row.bot.pending .bubble { color: #8e8e93; }
+  .think-row { font: inherit; font-size: 11px; color: #8e8e93; background: none; border: none;
+               padding: 0 4px 2px; cursor: pointer; text-align: left; }
+  .think-row[aria-expanded="true"] { color: #c7c7cc; }
+  .think-body { font-size: 12px; color: #8e8e93; white-space: pre-wrap; word-break: break-word;
+                padding: 4px 10px 8px; max-width: 100%; }
   .meta { font-size: 11px; color: #8e8e93; margin-top: 4px; }
   #banner { display: none; padding: 8px 14px; font-size: 12px; background: #2a1c10; color: #f0c9a8;
             border-bottom: 1px solid #3a2a18; }
@@ -251,6 +256,7 @@
   <script src="spill.js"></script>
   <script src="race.js"></script>
   <script src="auto.js"></script>
+  <script src="think.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -31,6 +31,11 @@
   .me { background: var(--ink); color: var(--paper); border-bottom-right-radius: 4px; }
   .zoo { background: var(--card); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
   .meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .think-row { font: inherit; font-size: 11px; color: var(--muted); background: none; border: none;
+               padding: 0; cursor: pointer; text-align: left; }
+  .think-row[aria-expanded="true"] { color: var(--ink); }
+  .think-body { font-size: 12px; color: var(--muted); white-space: pre-wrap; word-break: break-word;
+                padding: 4px 0 6px; }
   footer { border-top: 1px solid var(--line); background: var(--card); padding: 12px 18px; }
   .composer { max-width: 780px; margin: 0 auto; display: flex; gap: 10px; align-items: flex-end; }
   textarea { flex: 1; resize: none; border: 1px solid var(--line); border-radius: 14px;
@@ -95,11 +100,13 @@ paste a huge corpus with 🧠 and ask questions against it for pennies: it never
 </footer>
 
 <script src="auto.js"></script>
+<script src="think.js"></script>
 <script data-component="app-script">
 const $ = (id) => document.getElementById(id);
 const SKEY = "openzoo.session.v1";
 const Auto = window.OpenZooAuto;
 const AUTO_MODEL = (Auto && Auto.AUTO_MODEL) || "openzoo/auto";
+const Think = window.OpenZooThink;
 const state = Object.assign(
   { messages: [], ctx: null, spent: 0, direct: 0, calls: 0, model: "" },
   JSON.parse(localStorage.getItem(SKEY) || "{}"),
@@ -149,12 +156,39 @@ async function loadModels() {
   } catch { $("netChip").textContent = "proxy unreachable"; }
 }
 
-function bubble(text, mine, meta) {
+function paintThink(wrap, msg) {
+  wrap.querySelectorAll("[data-role=think-row], [data-role=think-body]").forEach((n) => n.remove());
+  if (!Think || !Think.hasReasoning(msg && msg.reasoning)) return;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "think-row";
+  btn.setAttribute("data-role", "think-row");
+  btn.setAttribute("data-component", "think-row");
+  btn.setAttribute("aria-expanded", msg.thinkOpen ? "true" : "false");
+  btn.textContent = Think.LABEL;
+  btn.onclick = () => {
+    msg.thinkOpen = !msg.thinkOpen;
+    paintThink(wrap, msg);
+  };
+  wrap.insertBefore(btn, wrap.firstChild);
+  if (msg.thinkOpen) {
+    const body = document.createElement("div");
+    body.className = "think-body";
+    body.setAttribute("data-role", "think-body");
+    body.setAttribute("data-component", "think-body");
+    body.textContent = msg.reasoning;
+    wrap.insertBefore(body, btn.nextSibling);
+  }
+}
+
+function bubble(text, mine, meta, reasoning) {
   const row = document.createElement("div");
   row.className = "row";
   row.setAttribute("data-row", mine ? "user" : "assistant");
   const wrap = document.createElement("div");
   wrap.setAttribute("data-role", "bubble-wrap");
+  const msg = mine ? null : { reasoning: reasoning || "", thinkOpen: false };
+  if (msg) wrap._thinkMsg = msg;
   const b = document.createElement("div");
   b.className = `bubble ${mine ? "me" : "zoo"}`;
   b.setAttribute("data-role", "bubble");
@@ -167,6 +201,7 @@ function bubble(text, mine, meta) {
     m.textContent = meta;
     wrap.appendChild(m);
   }
+  if (msg) paintThink(wrap, msg);
   row.appendChild(wrap);
   $("chat").appendChild(row);
   $("chat").scrollTop = $("chat").scrollHeight;
@@ -204,8 +239,18 @@ async function send() {
     } else if (!content) {
       content = d.error?.message || "🦉 the zoo returned an empty reply.";
     }
+    const parsed = Think ? Think.fromCompletion(d) : { content, reasoning: "" };
+    content = parsed.content || content;
     thinking.textContent = content;
-    state.messages.push({ role: "assistant", content });
+    const assistantMsg = { role: "assistant", content };
+    if (Think) Think.applyToMessage(assistantMsg, parsed);
+    state.messages.push(assistantMsg);
+    const wrap = thinking.parentElement;
+    if (wrap && wrap._thinkMsg) {
+      wrap._thinkMsg.reasoning = assistantMsg.reasoning || "";
+      wrap._thinkMsg.thinkOpen = false;
+      paintThink(wrap, wrap._thinkMsg);
+    }
     const x = d.x402 || {};
     state.calls += 1;
     if (typeof x.billedUsd === "number") state.spent += x.billedUsd;
@@ -254,7 +299,10 @@ async function bind() {
 }
 
 function restore() {
-  for (const m of state.messages) bubble(m.content, m.role === "user");
+  for (const m of state.messages) {
+    if (Think && m.role === "assistant") Think.normalizeMessage(m);
+    bubble(m.content, m.role === "user", null, m.reasoning);
+  }
   $("spent").textContent = `this session: $${state.spent.toFixed(4)}`;
   const restoreX = state.spent > 0 && typeof state.direct === "number" ? state.direct / state.spent : null;
   if (restoreX) $("saved").textContent = `${restoreX >= 100 ? Math.round(restoreX) : restoreX.toFixed(restoreX >= 10 ? 1 : 2)}× vs direct`;
