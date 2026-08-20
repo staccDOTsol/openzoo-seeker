@@ -15,6 +15,7 @@
   var signSeq = 1;
   var pendingFiles = [];
   var kindsCache = null;
+  var modelIds = [];
 
   function $(id) { return document.getElementById(id); }
 
@@ -23,10 +24,14 @@
   }
 
   function saveStore() {
+    var t = active();
     localStorage.setItem(STORE, JSON.stringify({
       threads: state.threads,
       activeId: state.activeId,
-      model: $('model') && $('model').value
+      model: $('model') && $('model').value,
+      tier: t && t.tier,
+      race: t && t.race,
+      raceNeed: t && t.raceNeed
     }));
   }
 
@@ -34,7 +39,43 @@
     return 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   }
 
+  function defaultSpend() {
+    var Race = window.OpenZooRace;
+    var tierSel = typeof document !== 'undefined' && document.getElementById('tierSel');
+    var raceSel = typeof document !== 'undefined' && document.getElementById('raceSel');
+    if (Race && tierSel && raceSel && raceSel.value) {
+      var live = Race.parseRaceValue(raceSel.value);
+      return {
+        tier: Race.normalizeTier(tierSel.value),
+        race: live.race,
+        raceNeed: live.raceNeed
+      };
+    }
+    var parsed = Race
+      ? Race.parseRaceValue((saved && saved.race != null)
+        ? Race.raceSelectValue(saved.race, saved.raceNeed)
+        : (Race.DEFAULT_NEED + ' ' + Race.DEFAULT_N))
+      : { race: 4, raceNeed: 2 };
+    return {
+      tier: (Race && Race.normalizeTier(saved && saved.tier)) || 'medium',
+      race: parsed.race,
+      raceNeed: parsed.raceNeed
+    };
+  }
+
+  function spendOf(thread) {
+    var Race = window.OpenZooRace;
+    var fallback = defaultSpend();
+    if (!thread) return fallback;
+    return {
+      tier: (Race && Race.normalizeTier(thread.tier)) || fallback.tier,
+      race: thread.race == null ? fallback.race : (Number(thread.race) || 0),
+      raceNeed: thread.raceNeed == null ? fallback.raceNeed : (Number(thread.raceNeed) || 1)
+    };
+  }
+
   function newThread(name) {
+    var spend = defaultSpend();
     var t = {
       id: uid(),
       name: name || 'openzoo',
@@ -45,7 +86,10 @@
       calls: 0,
       memory: null,
       spillCorpus: '',
-      preview: ''
+      preview: '',
+      tier: spend.tier,
+      race: spend.race,
+      raceNeed: spend.raceNeed
     };
     state.threads.unshift(t);
     state.activeId = t.id;
@@ -293,6 +337,7 @@
         return m.id && m.id.indexOf('~') !== 0 && m.id.indexOf(':batch') < 0;
       });
       models.sort(function (a, b) { return a.id.localeCompare(b.id); });
+      modelIds = models.map(function (m) { return m.id; });
       sel.innerHTML = '';
       models.forEach(function (m) {
         var o = document.createElement('option');
@@ -351,7 +396,32 @@
     $('walletBtn').textContent = wallet.address
       ? (wallet.address.slice(0, 4) + '…' + wallet.address.slice(-4))
       : 'wallet';
+    setDials();
     renderHud();
+  }
+
+  function setDials() {
+    if (!window.OpenZooRace) return;
+    var t = active();
+    var spend = spendOf(t);
+    var tierSel = $('tierSel');
+    var raceSel = $('raceSel');
+    var modelSel = $('model');
+    if (!tierSel || !raceSel) return;
+    tierSel.value = spend.tier;
+    raceSel.value = OpenZooRace.raceSelectValue(spend.race, spend.raceNeed);
+    var racing = spend.race >= 2;
+    if (modelSel) {
+      modelSel.disabled = racing;
+      modelSel.className = 'dial' + (racing ? ' pinned' : '');
+      modelSel.title = racing
+        ? 'Racing the ' + spend.tier + ' band — pick 1 model to pin a single model.'
+        : 'Model';
+    }
+    tierSel.className = 'dial' + (spend.tier === 'expensive' || spend.tier === 'grok4.6' ? ' hot' : '');
+    raceSel.className = 'dial' + (racing ? ' hot' : '');
+    tierSel.title = 'How much to spend per turn when racing';
+    raceSel.title = 'Ask N models from the tier at once. First X countable back are judged. You pay for every entrant.';
   }
 
   function renderHud() {
@@ -386,7 +456,7 @@
     }
     t.messages.forEach(function (m) {
       var row = document.createElement('div');
-      row.className = 'row ' + (m.role === 'user' ? 'user' : 'bot');
+      row.className = 'row ' + (m.role === 'user' ? 'user' : 'bot') + (m.pending ? ' pending' : '');
       var bubble = document.createElement('div');
       bubble.className = 'bubble';
       bubble.textContent = m.content;
@@ -473,8 +543,36 @@
 
   function completedHistory(thread) {
     return thread.messages.filter(function (m, i) {
-      return !(i === thread.messages.length - 1 && m.role === 'assistant' && m.content === '…');
+      return !(i === thread.messages.length - 1 && m.role === 'assistant' && (m.pending || m.content === '…'));
     }).map(function (m) { return { role: m.role, content: m.content }; });
+  }
+
+  function noteThreadReceipt(thread, x402) {
+    if (!window.OpenZooSpill) return null;
+    if (typeof thread.directUsd !== 'number') thread.directUsd = 0;
+    var receipt = OpenZooSpill.noteReceipt({
+      spentUsd: thread.spent,
+      directUsd: thread.directUsd,
+      calls: thread.calls
+    }, x402 || {});
+    thread.spent = receipt.spentUsd;
+    thread.directUsd = receipt.directUsd;
+    thread.calls = receipt.calls;
+    return receipt;
+  }
+
+  function paintAssistant(thread, patch) {
+    var last = thread.messages[thread.messages.length - 1];
+    if (!last || last.role !== 'assistant') return;
+    if (patch.replace) last.content = patch.content == null ? '' : String(patch.content);
+    else if (patch.content != null && patch.content !== '') {
+      if (!last.content || last.content === '…') last.content = String(patch.content);
+      else last.content += String(patch.content);
+    }
+    if (patch.meta != null) last.meta = patch.meta;
+    if (patch.pending != null) last.pending = patch.pending;
+    renderLog();
+    renderHud();
   }
 
   async function bindCorpus(thread, corpus, opts) {
@@ -519,7 +617,54 @@
     return bindCorpus(thread, corpus, { chat: true, silent: true });
   }
 
-  async function postChat(thread, history, retried) {
+  async function readSSE(res, onDelta) {
+    var reader = res.body.getReader();
+    var dec = new TextDecoder();
+    var buf = '';
+    var content = '';
+    var last = {};
+    while (true) {
+      var chunk = await reader.read();
+      if (chunk.done) break;
+      buf += dec.decode(chunk.value, { stream: true });
+      var lines = buf.split('\n');
+      buf = lines.pop();
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i];
+        if (line.indexOf('data:') !== 0) continue;
+        var payload = line.slice(5).trim();
+        if (!payload || payload === '[DONE]') continue;
+        try {
+          var ev = JSON.parse(payload);
+          last = ev;
+          var delta = ev.choices && ev.choices[0] && ev.choices[0].delta;
+          var piece = delta && delta.content;
+          if (piece) {
+            content += piece;
+            if (onDelta) onDelta(piece);
+          }
+        } catch (_) {}
+      }
+    }
+    if (!last.choices) last = { choices: [{ message: { content: content } }] };
+    if (!last.choices[0]) last.choices[0] = {};
+    if (!last.choices[0].message) last.choices[0].message = { content: content };
+    if (!last.choices[0].message.content) last.choices[0].message.content = content;
+    return { r: res, d: last, streamed: true, streamedContent: content };
+  }
+
+  async function readCompletion(res, onDelta) {
+    var ct = '';
+    try { ct = (res.headers && res.headers.get && res.headers.get('content-type')) || ''; } catch (_) {}
+    if (/event-stream/i.test(ct) && res.body && res.body.getReader) {
+      return readSSE(res, onDelta);
+    }
+    var d = await res.json();
+    return { r: res, d: d, streamed: false };
+  }
+
+  async function postChat(thread, history, retried, opts) {
+    opts = opts || {};
     var planned = OpenZooSpill.planChatSpill(history, thread);
     if (planned.bind && planned.corpus) {
       try {
@@ -531,25 +676,78 @@
     }
     var headers = OpenZooSpill.chatHeaders(planned.contextId);
     OpenZooSpill.assertNoFullDump(headers, planned.messages, history.length);
-    var maxTok = /deepseek|grok|thinking|fable|sonnet-5|-r1|reason/i.test($('model').value) ? 16384 : 4096;
+    var model = opts.model || $('model').value;
+    var maxTok = opts.maxTokens || (/deepseek|grok|thinking|fable|sonnet-5|-r1|reason/i.test(model) ? 16384 : 4096);
+    var body = {
+      model: model,
+      messages: planned.messages,
+      max_tokens: maxTok
+    };
+    if (opts.stream) body.stream = true;
     var r = await OpenZooPay.paidFetch(GATEWAY + '/v1/chat/completions', {
       method: 'POST',
       headers: headers,
-      body: JSON.stringify({
-        model: $('model').value,
-        messages: planned.messages,
-        max_tokens: maxTok
-      })
-    }, payCtx());
-    var d = await r.json();
+      body: JSON.stringify(body)
+    }, Object.assign(payCtx(), { keepPending: !!opts.keepPending }));
+    var read = await readCompletion(r, opts.onDelta);
+    var d = read.d;
     if (r.status === 404 && /context_not_found/.test(JSON.stringify(d)) && !retried) {
       thread.memory = null;
       thread.spillCorpus = '';
       var fresh = OpenZooSpill.planChatSpill(history, thread);
       if (fresh.corpus) await spillPrefix(thread, fresh.corpus);
-      return postChat(thread, history, true);
+      return postChat(thread, history, true, opts);
     }
-    return { r: r, d: d, planned: planned };
+    return { r: r, d: d, planned: planned, streamed: read.streamed, streamedContent: read.streamedContent };
+  }
+
+  async function postJudge(model, messages, maxTok) {
+    var r = await OpenZooPay.paidFetch(GATEWAY + '/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: model || OpenZooRace.JUDGE_MODEL,
+        messages: messages,
+        max_tokens: maxTok || 24
+      })
+    }, Object.assign(payCtx(), { keepPending: true }));
+    var d = await r.json();
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    noteThreadReceipt(active(), d.x402);
+    return (d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) || '';
+  }
+
+  function isJudgePrompt(messages) {
+    var first = messages && messages[0] && messages[0].content;
+    return /Score this answer to one question|Pick the single best one/i.test(String(first || ''));
+  }
+
+  function streamRacer(thread) {
+    return async function (messages, onDelta, _ctx, model) {
+      if (isJudgePrompt(messages) || model === OpenZooRace.JUDGE_MODEL) {
+        return postJudge(OpenZooRace.JUDGE_MODEL, messages, 24);
+      }
+      try {
+        var posted = await postChat(thread, messages, false, {
+          model: model,
+          stream: typeof onDelta === 'function',
+          onDelta: onDelta,
+          keepPending: true
+        });
+        if (!posted.r.ok) throw new Error('HTTP ' + posted.r.status);
+        var ch = posted.d.choices && posted.d.choices[0];
+        var content = (ch && ch.message && ch.message.content) || posted.streamedContent || '';
+        noteThreadReceipt(thread, posted.d && posted.d.x402);
+        if (content && onDelta && !posted.streamed) onDelta(content);
+        return content;
+      } catch (e) {
+        if (e && (e.code === 'wrap-cancelled' || e.prompt || /wrap cancelled/i.test(e.message || ''))) throw e;
+        if (window.OpenZooPay && OpenZooPay.isTransientNetworkError(e)) {
+          throw Object.assign(new TypeError('fetch failed'), { name: 'TypeError' });
+        }
+        throw e;
+      }
+    };
   }
 
   async function submit() {
@@ -570,42 +768,79 @@
       t.messages.push({ role: 'user', content: text });
       t.preview = text;
     }
-    t.messages.push({ role: 'assistant', content: '…' });
+    t.messages.push({ role: 'assistant', content: '', meta: '…', pending: true });
     state.busy = true;
     render();
     try {
       if (corpus) await attachQuietly(t, corpus);
       var history = completedHistory(t);
-      var posted = await postChat(t, history);
-      var r = posted.r;
-      var d = posted.d;
-      if (!r.ok) {
-        var msg = OpenZooPay.humanizeError((d.error && d.error.message) || d.error || d.message || ('HTTP ' + r.status));
-        t.messages.pop();
-        t.messages.push({ role: 'assistant', content: 'the zoo hiccuped: ' + msg });
-        setBanner(msg);
-      } else {
-        setBanner('');
-        var ch = d.choices && d.choices[0];
-        var content = (ch && ch.message && ch.message.content) || '';
-        if (!content) content = 'the zoo returned an empty reply.';
-        var x = d.x402 || {};
-        if (typeof t.directUsd !== 'number') t.directUsd = 0;
-        var receipt = OpenZooSpill.noteReceipt({
-          spentUsd: t.spent,
-          directUsd: t.directUsd,
-          calls: t.calls
-        }, x);
-        t.spent = receipt.spentUsd;
-        t.directUsd = receipt.directUsd;
-        t.calls = receipt.calls;
-        var bits = [];
-        if (typeof x.billedUsd === 'number') bits.push('$' + x.billedUsd.toFixed(4));
-        if (receipt.savingX) bits.push(OpenZooSpill.formatSavingX(receipt.savingX));
-        t.messages.pop();
-        t.messages.push({ role: 'assistant', content: content, meta: bits.join(' · ') });
-        t.preview = content.slice(0, 80);
+      var spend = spendOf(t);
+      var racing = window.OpenZooRace && spend.race >= 2;
+      var content = '';
+      var lastX402 = {};
+      if (racing) {
+        if (window.OpenZooPay) OpenZooPay.clearPending402();
+        var models = OpenZooRace.tierModels(spend.tier, spend.race, true, modelIds);
+        if (models.length < 2) {
+          racing = false;
+        } else {
+          paintAssistant(t, { meta: OpenZooRace.formatRaceStatus(0, spend.raceNeed), pending: true });
+          content = await OpenZooRace.brainRace(
+            history,
+            function (delta, meta) {
+              if (meta && meta.replace) paintAssistant(t, { content: delta, replace: true, pending: true });
+              else paintAssistant(t, { content: delta, pending: true });
+            },
+            t.memory,
+            models,
+            spend.raceNeed,
+            undefined,
+            function (status) {
+              paintAssistant(t, { meta: status, pending: true });
+            },
+            { stream: streamRacer(t) }
+          );
+          lastX402 = {};
+        }
       }
+      if (!racing) {
+        var posted = await postChat(t, history);
+        var r = posted.r;
+        var d = posted.d;
+        if (!r.ok) {
+          var msg = OpenZooPay.humanizeError((d.error && d.error.message) || d.error || d.message || ('HTTP ' + r.status));
+          t.messages.pop();
+          t.messages.push({ role: 'assistant', content: 'the zoo hiccuped: ' + msg });
+          setBanner(msg);
+          saveStore();
+          state.busy = false;
+          render();
+          return;
+        }
+        var ch = d.choices && d.choices[0];
+        content = (ch && ch.message && ch.message.content) || posted.streamedContent || '';
+        lastX402 = d.x402 || {};
+        noteThreadReceipt(t, lastX402);
+      }
+      setBanner('');
+      if (!content) content = racing ? OpenZooRace.RACE_EVERY_FAILED : 'the zoo returned an empty reply.';
+      var bits = [];
+      if (typeof lastX402.billedUsd === 'number') bits.push('$' + lastX402.billedUsd.toFixed(4));
+      if (t.spent > 0 && window.OpenZooSpill) {
+        var mult = OpenZooSpill.hudSavingX(t.directUsd, t.spent);
+        if (mult) bits.push(OpenZooSpill.formatSavingX(mult));
+        else if (!lastX402.billedUsd && t.spent) bits.push('$' + Number(t.spent).toFixed(4));
+      }
+      if (racing) bits.push('race ' + spend.raceNeed + '/' + spend.race);
+      var last = t.messages[t.messages.length - 1];
+      if (last && last.role === 'assistant') {
+        last.content = content;
+        last.meta = bits.join(' · ');
+        last.pending = false;
+      } else {
+        t.messages.push({ role: 'assistant', content: content, meta: bits.join(' · ') });
+      }
+      t.preview = content.slice(0, 80);
       saveStore();
     } catch (e) {
       if (e && (e.code === 'wrap-cancelled' || /wrap cancelled/i.test(e.message || ''))) {
@@ -744,6 +979,24 @@
   });
   $('send').onclick = submit;
   $('model').onchange = saveStore;
+  if ($('tierSel')) {
+    $('tierSel').onchange = function () {
+      active().tier = window.OpenZooRace ? OpenZooRace.normalizeTier($('tierSel').value) : $('tierSel').value;
+      saveStore();
+      setDials();
+    };
+  }
+  if ($('raceSel')) {
+    $('raceSel').onchange = function () {
+      var parsed = window.OpenZooRace
+        ? OpenZooRace.parseRaceValue($('raceSel').value)
+        : { race: 0, raceNeed: 1 };
+      active().race = parsed.race;
+      active().raceNeed = parsed.raceNeed;
+      saveStore();
+      setDials();
+    };
+  }
 
   render();
   loadModels();
