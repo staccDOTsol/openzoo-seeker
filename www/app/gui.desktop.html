@@ -54,8 +54,9 @@
 <header data-component="topbar">
   <span data-role="logo" style="font-size:22px">🦓</span>
   <h1 data-role="title">openzoo</h1>
-  <input id="model" list="modelList" data-component="model-picker" placeholder="🔎 pick an animal…"
-    style="border:1px solid var(--line);border-radius:12px;padding:6px 10px;background:var(--paper);width:280px">
+  <input id="model" list="modelList" data-component="model-picker" placeholder="🎯 Auto — or pin an animal…"
+    style="border:1px solid var(--line);border-radius:12px;padding:6px 10px;background:var(--paper);width:280px"
+    title="Auto lets the sidecar pick. Pin a real model to lock one.">
   <datalist id="modelList" data-component="model-datalist"></datalist>
   <button class="ghost" id="brainBtn" data-component="brain-toggle">🧠 teach the zoo</button>
   <button class="ghost" id="newBtn" data-component="new-chat" title="fresh session">✨ new</button>
@@ -93,9 +94,12 @@ paste a huge corpus with 🧠 and ask questions against it for pennies: it never
   </div>
 </footer>
 
+<script src="auto.js"></script>
 <script data-component="app-script">
 const $ = (id) => document.getElementById(id);
 const SKEY = "openzoo.session.v1";
+const Auto = window.OpenZooAuto;
+const AUTO_MODEL = (Auto && Auto.AUTO_MODEL) || "openzoo/auto";
 const state = Object.assign(
   { messages: [], ctx: null, spent: 0, direct: 0, calls: 0, model: "" },
   JSON.parse(localStorage.getItem(SKEY) || "{}"),
@@ -103,22 +107,35 @@ const state = Object.assign(
 );
 function persist() {
   const { messages, ctx, spent, direct, calls } = state;
-  localStorage.setItem(SKEY, JSON.stringify({ messages, ctx, spent, direct, calls, model: $("model")?.value || "" }));
+  localStorage.setItem(SKEY, JSON.stringify({ messages, ctx, spent, direct, calls, model: $("model")?.value || AUTO_MODEL }));
 }
 
-const ANIMAL = (id) => id.startsWith("anthropic") ? "🦒" : id.startsWith("openai") ? "🦉"
+const ANIMAL = (id) => Auto ? Auto.animalFor(id)
+  : id.startsWith("anthropic") ? "🦒" : id.startsWith("openai") ? "🦉"
   : id.startsWith("deepseek") ? "🐋" : id.startsWith("x-ai") ? "🦊" : id.startsWith("google") ? "🐦"
   : id.startsWith("meta") ? "🦙" : id.startsWith("mistral") ? "🐈" : id.startsWith("qwen") ? "🐼" : "🐾";
+
+function sendModel() {
+  return Auto ? Auto.sendModel($("model")?.value) : ($("model")?.value || AUTO_MODEL);
+}
 
 async function loadModels() {
   try {
     const r = await fetch("/v1/models");
     const d = await r.json();
-    const models = (d.data || []).filter((m) => !m.id.startsWith("~") && !m.id.includes(":batch"));
+    let models = (d.data || []).filter((m) => !m.id.startsWith("~") && !m.id.includes(":batch"));
     models.sort((a, b) => a.id.localeCompare(b.id));
+    if (Auto) models = Auto.catalogWithAuto(models);
+    else models = [{ id: AUTO_MODEL }].concat(models.filter((m) => m.id !== AUTO_MODEL));
     const dl = $("modelList");
     dl.innerHTML = "";
+    const autoOpt = document.createElement("option");
+    autoOpt.value = AUTO_MODEL;
+    autoOpt.setAttribute("data-option", AUTO_MODEL);
+    autoOpt.label = "🎯 Auto";
+    dl.appendChild(autoOpt);
     for (const m of models) {
+      if (m.id === AUTO_MODEL) continue;
       const o = document.createElement("option");
       o.value = m.id;
       o.setAttribute("data-option", m.id);
@@ -126,10 +143,7 @@ async function loadModels() {
       o.label = `${ANIMAL(m.id)} $${inM}/M`;
       dl.appendChild(o);
     }
-    if (!$("model").value) {
-      const pick = models.find((m) => m.id.includes("deepseek-v4-pro")) || models[0];
-      if (pick) $("model").value = pick.id;
-    }
+    if (!$("model").value) $("model").value = AUTO_MODEL;
     $("netChip").textContent = `${models.length} animals`;
     $("netChip").classList.add("on");
   } catch { $("netChip").textContent = "proxy unreachable"; }
@@ -176,9 +190,10 @@ async function send() {
       // a whole essay of invisible reasoning and zero visible words (measured
       // live: deepseek, finish_reason "length", empty content, $0.0172)
       body: JSON.stringify({
-        model: $("model").value,
+        model: sendModel(),
         messages: state.messages,
-        max_tokens: /deepseek|grok|thinking|fable|sonnet-5|-r1|reason/i.test($("model").value) ? 16384 : 4096,
+        max_tokens: Auto ? Auto.reasoningMaxTokens(sendModel())
+          : (/deepseek|grok|thinking|fable|sonnet-5|-r1|reason|openzoo\/auto/i.test(sendModel()) ? 16384 : 4096),
       }),
     });
     const d = await r.json();
@@ -187,7 +202,7 @@ async function send() {
     if (!content && ch?.finish_reason === "length") {
       content = "🦥 the animal thought so hard it ran out of room before saying anything. try again — the cage just got bigger.";
     } else if (!content) {
-      content = d.error?.message || "🦉 the zoo returned something unusual: " + JSON.stringify(d).slice(0, 200);
+      content = d.error?.message || "🦉 the zoo returned an empty reply.";
     }
     thinking.textContent = content;
     state.messages.push({ role: "assistant", content });
@@ -198,6 +213,8 @@ async function send() {
     const bits = [];
     if (typeof x.billedUsd === "number") bits.push(`$${x.billedUsd.toFixed(4)}`);
     if (x.lecore?.engaged) bits.push(`🧠 ${x.lecore.recalled ?? "?"} slices`);
+    const routed = Auto ? Auto.displayRouted(d, sendModel()) : (d.model && d.model !== AUTO_MODEL ? d.model : "");
+    if (routed && typeof routed === "string" && routed[0] !== "{" && routed[0] !== "[") bits.push(routed);
     if (bits.length) thinking.parentElement.querySelector("[data-role=bubble-meta]")?.remove(),
       thinking.insertAdjacentHTML("afterend", `<div class="meta" data-role="bubble-meta">${bits.join(" · ")}</div>`);
     $("spent").textContent = `this session: $${state.spent.toFixed(4)}`;
@@ -242,7 +259,7 @@ function restore() {
   const restoreX = state.spent > 0 && typeof state.direct === "number" ? state.direct / state.spent : null;
   if (restoreX) $("saved").textContent = `${restoreX >= 100 ? Math.round(restoreX) : restoreX.toFixed(restoreX >= 10 ? 1 : 2)}× vs direct`;
   if (state.calls) $("calls").textContent = `${state.calls} call${state.calls === 1 ? "" : "s"}`;
-  if (state.model) $("model").value = state.model;
+  $("model").value = (Auto ? Auto.sendModel(state.model) : (state.model || AUTO_MODEL));
   if (state.ctx) {
     const chip = $("ctxChip");
     chip.style.display = "";

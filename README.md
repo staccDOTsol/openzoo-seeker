@@ -24,6 +24,8 @@ The shell owns the wallet. The UI never sees a key. There is no local `:8402` si
 
 Attach is abstract: you drop files, a folder, or notes. The app keeps a corpus with that thread behind the scenes. Chat uses the same Claude / `npx openzoo claude` spill path: a context id per thread, older turns bound once, later calls send a short tail plus that id. Completions never pair `x-hrr-context` with the growing messages array. The screen never shows context ids, bind routes, or wrap-twin homework. HUD savings is `directUsd / spentUsd`, not a running sum of `savesVsDirect`.
 
+The model picker defaults to **Auto** (`openzoo/auto`). Unpinned chats send that virtual id; the sidecar picks the cheapest model that can finish. After a reply the bubble meta shows the routed id compactly. Pin a real catalog model to lock one. This is model selection, not auto-run tools.
+
 Race (the spend dial, not spill): pick a band — cheap / medium / expensive / grok4.6 — and launch N models from that band. Default is **best 2 of 4**. The first two *countable* answers are judged by a cheap classifier; empty / HTTP / pay / fetch-failed do not count and cannot win. If nobody clears, the last of those two ships. All-fail is a race-level error, never one model's `fetch failed`. The bubble shows `racing k/n back…` and streams the live racer if tokens are already flowing. Each entrant still pays via x402 + MWA. This is not desktop SPAWN / worktrees.
 
 ## Wallet bridge

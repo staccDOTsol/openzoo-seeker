@@ -16,6 +16,8 @@
   var pendingFiles = [];
   var kindsCache = null;
   var modelIds = [];
+  var Auto = window.OpenZooAuto;
+  var AUTO_MODEL = (Auto && Auto.AUTO_MODEL) || 'openzoo/auto';
 
   function $(id) { return document.getElementById(id); }
 
@@ -316,6 +318,7 @@
   parent.postMessage({ type: 'wallet-request-info' }, '*');
 
   function animal(id) {
+    if (Auto) return Auto.animalFor(id);
     if (!id) return '🐾';
     if (id.indexOf('anthropic') === 0) return '🦒';
     if (id.indexOf('openai') === 0) return '🦉';
@@ -328,6 +331,12 @@
     return '🐾';
   }
 
+  function pinnedModel() {
+    var sel = $('model');
+    var v = sel && sel.value;
+    return Auto ? Auto.sendModel(v) : (v || AUTO_MODEL);
+  }
+
   async function loadModels() {
     var sel = $('model');
     try {
@@ -337,19 +346,25 @@
         return m.id && m.id.indexOf('~') !== 0 && m.id.indexOf(':batch') < 0;
       });
       models.sort(function (a, b) { return a.id.localeCompare(b.id); });
-      modelIds = models.map(function (m) { return m.id; });
+      if (Auto) models = Auto.catalogWithAuto(models);
+      else models = [{ id: AUTO_MODEL }].concat(models.filter(function (m) { return m.id !== AUTO_MODEL; }));
+      modelIds = models.map(function (m) { return m.id; }).filter(function (id) { return id !== AUTO_MODEL; });
       sel.innerHTML = '';
       models.forEach(function (m) {
         var o = document.createElement('option');
         o.value = m.id;
-        o.textContent = animal(m.id) + ' ' + m.id.replace(/^[^/]+\//, '');
+        o.textContent = Auto ? Auto.pickerLabel(m.id) : (animal(m.id) + ' ' + m.id.replace(/^[^/]+\//, ''));
         sel.appendChild(o);
       });
-      var want = (saved && saved.model) || 'google/gemini-3.7-flash';
-      if ([].some.call(sel.options, function (o) { return o.value === want; })) sel.value = want;
-      else if (models[0]) sel.value = models[0].id;
+      var want = (saved && saved.model) || AUTO_MODEL;
+      if (want !== AUTO_MODEL && [].some.call(sel.options, function (o) { return o.value === want; })) {
+        sel.value = want;
+      } else {
+        sel.value = AUTO_MODEL;
+      }
     } catch (_) {
-      sel.innerHTML = '<option value="google/gemini-3.7-flash">gemini flash</option>';
+      sel.innerHTML = '<option value="openzoo/auto">🎯 Auto</option>';
+      sel.value = AUTO_MODEL;
     }
   }
 
@@ -416,7 +431,7 @@
       modelSel.className = 'dial' + (racing ? ' pinned' : '');
       modelSel.title = racing
         ? 'Racing the ' + spend.tier + ' band — pick 1 model to pin a single model.'
-        : 'Model';
+        : 'Auto lets the sidecar pick. Pin a real model to lock one.';
     }
     tierSel.className = 'dial' + (spend.tier === 'expensive' || spend.tier === 'grok4.6' ? ' hot' : '');
     raceSel.className = 'dial' + (racing ? ' hot' : '');
@@ -676,8 +691,9 @@
     }
     var headers = OpenZooSpill.chatHeaders(planned.contextId);
     OpenZooSpill.assertNoFullDump(headers, planned.messages, history.length);
-    var model = opts.model || $('model').value;
-    var maxTok = opts.maxTokens || (/deepseek|grok|thinking|fable|sonnet-5|-r1|reason/i.test(model) ? 16384 : 4096);
+    var model = opts.model || pinnedModel();
+    var maxTok = opts.maxTokens || (Auto ? Auto.reasoningMaxTokens(model)
+      : (/deepseek|grok|thinking|fable|sonnet-5|-r1|reason|openzoo\/auto/i.test(model) ? 16384 : 4096));
     var body = {
       model: model,
       messages: planned.messages,
@@ -778,6 +794,7 @@
       var racing = window.OpenZooRace && spend.race >= 2;
       var content = '';
       var lastX402 = {};
+      var lastRouted = '';
       if (racing) {
         if (window.OpenZooPay) OpenZooPay.clearPending402();
         var models = OpenZooRace.tierModels(spend.tier, spend.race, true, modelIds);
@@ -820,6 +837,7 @@
         var ch = d.choices && d.choices[0];
         content = (ch && ch.message && ch.message.content) || posted.streamedContent || '';
         lastX402 = d.x402 || {};
+        lastRouted = Auto ? Auto.displayRouted(d, pinnedModel()) : (d.model && d.model !== AUTO_MODEL ? d.model : '');
         noteThreadReceipt(t, lastX402);
       }
       setBanner('');
@@ -831,6 +849,7 @@
         if (mult) bits.push(OpenZooSpill.formatSavingX(mult));
         else if (!lastX402.billedUsd && t.spent) bits.push('$' + Number(t.spent).toFixed(4));
       }
+      if (lastRouted) bits.push(lastRouted);
       if (racing) bits.push('race ' + spend.raceNeed + '/' + spend.race);
       var last = t.messages[t.messages.length - 1];
       if (last && last.role === 'assistant') {
