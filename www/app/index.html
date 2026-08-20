@@ -39,6 +39,8 @@
   .dial { border: 1px solid #2c2c2e; background: #131315; color: #8e8e93; font: inherit; font-size: 11px;
           border-radius: 999px; padding: 4px 8px; cursor: pointer; max-width: 160px; }
   .dial:hover { color: #ececec; border-color: #3a3a3c; }
+  .dial.hot { color: #b8f240; border-color: #b8f240; }
+  .dial:disabled, .dial.pinned { opacity: .45; cursor: default; }
   #hudChip { cursor: default; pointer-events: none; max-width: 200px; white-space: nowrap; }
   .icon-btn { width: 32px; height: 32px; border-radius: 50%; border: none; background: transparent;
               color: #ececec; display: flex; align-items: center; justify-content: center; cursor: pointer;
@@ -188,6 +190,28 @@
       <div id="chatHeaderId"></div>
       <div id="headerDials">
         <span class="dial" id="hudChip" data-component="hud-savings" hidden title=""></span>
+        <select class="dial" id="tierSel" data-component="model-tier" aria-label="Model tier"
+                title="How much to spend per turn when racing">
+          <option value="cheap">cheap</option>
+          <option value="medium" selected>medium</option>
+          <option value="expensive">expensive</option>
+          <option value="grok4.6">grok4.6</option>
+        </select>
+        <select class="dial" id="raceSel" data-component="model-race" aria-label="Race models"
+                title="Ask N models from the tier at once. First X countable back are judged. You pay for every entrant.">
+          <option value="0">1 model</option>
+          <optgroup label="first back wins">
+            <option value="2">race 2</option>
+            <option value="3">race 3</option>
+            <option value="4">race 4</option>
+          </optgroup>
+          <optgroup label="judge the first k back">
+            <option value="2 3">best 2 of 3</option>
+            <option value="2 4" selected>best 2 of 4</option>
+            <option value="3 4">best 3 of 4</option>
+            <option value="4 4">best 4 of 4</option>
+          </optgroup>
+        </select>
         <select class="dial" id="model" data-component="model-picker" aria-label="Model"></select>
         <button class="dial" id="walletBtn" data-component="wallet-open">wallet</button>
         <button class="dial" id="leaveBtn" data-component="leave-button">leave</button>
@@ -224,6 +248,7 @@
   <script src="pay.js"></script>
   <script src="copy.js"></script>
   <script src="spill.js"></script>
+  <script src="race.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -289,6 +289,21 @@
   var PENDING_KEY = 'openzoo.seeker.pending402.v1';
   var memStore = {};
   var resumeWaiters = [];
+  var payGate = Promise.resolve();
+  var payDepth = 0;
+
+  function withPayGate(fn) {
+    var release;
+    var prev = payGate;
+    payGate = new Promise(function (r) { release = r; });
+    return prev.catch(function () {}).then(function () {
+      payDepth += 1;
+      return Promise.resolve().then(fn);
+    }).finally(function () {
+      payDepth = Math.max(0, payDepth - 1);
+      release();
+    });
+  }
   var NET_RE = /load failed|failed to fetch|failed to load|networkerror|typeerror|net::|err_internet|err_connection|err_name_not_resolved|offline|interrupted|abort|the internet connection appears to be offline|network request failed/i;
 
   function defaultStore() {
@@ -581,7 +596,7 @@
   function paidFetch(url, options, ctx) {
     ctx = ctx || {};
     var headers = Object.assign({ authorization: AUTH }, options && options.headers ? options.headers : {});
-    clearPending402(ctx);
+    if (!ctx.keepPending && !payDepth) clearPending402(ctx);
 
     function once(extraHeaders) {
       return fetchWithResumeRetry(url, Object.assign({}, options, {
@@ -628,7 +643,7 @@
           return Promise.resolve(ctx.signTransaction(built.transaction)).then(function (signed) {
             if (!signed) throw PayError('wallet returned an empty signature');
             return afterWalletReturn(ctx).then(function () {
-              return settle(built.envelope, signed);
+              return { envelope: built.envelope, signed: signed };
             });
           });
         });
@@ -696,7 +711,14 @@
       }
       return res.json().then(function (challenge) {
         persist({ step: 'plan', challenge: challenge });
-        return fromChallenge(challenge);
+        return withPayGate(function () {
+          return fromChallenge(challenge);
+        }).then(function (paid) {
+          if (!paid || !paid.envelope || !paid.signed) {
+            throw PayError('Could not finish the payment.');
+          }
+          return settle(paid.envelope, paid.signed);
+        });
       });
     }).catch(function (err) {
       if (err && err.name === 'PayError') throw err;
@@ -721,6 +743,7 @@
     pickPayablePlan: pickPayablePlan,
     encodePayment: encodePayment,
     paidFetch: paidFetch,
+    withPayGate: withPayGate,
     visibleHoldings: visibleHoldings,
     poolState: poolState,
     topUpFromHoldings: topUpFromHoldings,
