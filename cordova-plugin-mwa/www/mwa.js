@@ -40,6 +40,21 @@ var MWA = {
      */
     signAndSendTransaction: function(txB64, success, error) {
         cordovaExec(success, error, 'MWAPlugin', 'signAndSendTransaction', [txB64]);
+    },
+
+    /**
+     * Write text to the Android clipboard (ClipboardManager).
+     * navigator.clipboard.writeText does not work in this WebView.
+     */
+    copyToClipboard: function(text, success, error) {
+        cordovaExec(success, error, 'MWAPlugin', 'copyToClipboard', [text == null ? '' : String(text)]);
+    },
+
+    /**
+     * Read text from the Android clipboard.
+     */
+    readClipboard: function(success, error) {
+        cordovaExec(success, error, 'MWAPlugin', 'readClipboard', []);
     }
 };
 

@@ -236,6 +236,131 @@
     return Buffer.from(json, 'utf8').toString('base64');
   }
 
+  var PENDING_KEY = 'openzoo.seeker.pending402.v1';
+  var memStore = {};
+  var resumeWaiters = [];
+  var NET_RE = /load failed|failed to fetch|failed to load|networkerror|typeerror|net::|err_internet|err_connection|err_name_not_resolved|offline|interrupted|abort|the internet connection appears to be offline|network request failed/i;
+
+  function defaultStore() {
+    try {
+      if (typeof localStorage !== 'undefined' && localStorage) return localStorage;
+    } catch (_) {}
+    return {
+      getItem: function (k) { return Object.prototype.hasOwnProperty.call(memStore, k) ? memStore[k] : null; },
+      setItem: function (k, v) { memStore[k] = String(v); },
+      removeItem: function (k) { delete memStore[k]; }
+    };
+  }
+
+  function storeOf(ctx) {
+    return (ctx && ctx.store) || defaultStore();
+  }
+
+  function savePending402(record, ctx) {
+    record = record || {};
+    record.at = Date.now();
+    try { storeOf(ctx).setItem(PENDING_KEY, JSON.stringify(record)); } catch (_) {}
+    return record;
+  }
+
+  function loadPending402(ctx) {
+    try {
+      var raw = storeOf(ctx).getItem(PENDING_KEY);
+      if (!raw) return null;
+      var rec = JSON.parse(raw);
+      if (!rec || typeof rec !== 'object') return null;
+      if (Date.now() - (rec.at || 0) > 10 * 60 * 1000) {
+        clearPending402(ctx);
+        return null;
+      }
+      return rec;
+    } catch (_) { return null; }
+  }
+
+  function clearPending402(ctx) {
+    try { storeOf(ctx).removeItem(PENDING_KEY); } catch (_) {}
+  }
+
+  function isTransientNetworkError(err) {
+    if (!err) return false;
+    var name = err.name || '';
+    var msg = String(err.message || err || '');
+    if (name === 'NetworkError' || name === 'AbortError') return true;
+    if (name === 'TypeError' && (!err.message || NET_RE.test(msg))) return true;
+    return NET_RE.test(msg);
+  }
+
+  function friendlyNetworkMessage(err) {
+    return 'Connection dropped while the wallet app was open. The payment retries when you return.';
+  }
+
+  function humanizeError(err) {
+    var raw = String((err && err.message) || err || '');
+    if (isTransientNetworkError(err) || NET_RE.test(raw) || /typeerror|load failed|failed to fetch/i.test(raw)) {
+      return friendlyNetworkMessage(err);
+    }
+    if (!raw) return 'Something went wrong.';
+    return wrap.stripTwinHomework(raw);
+  }
+
+  function notifyResume() {
+    var list = resumeWaiters.slice();
+    resumeWaiters = [];
+    for (var i = 0; i < list.length; i++) {
+      try { list[i](); } catch (_) {}
+    }
+  }
+
+  function delay(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
+  function waitForForeground(ctx) {
+    if (ctx && ctx.waitForForeground) return Promise.resolve(ctx.waitForForeground());
+    if (typeof document === 'undefined' || document.visibilityState !== 'hidden') {
+      return Promise.resolve();
+    }
+    return new Promise(function (resolve) {
+      var settled = false;
+      function done() {
+        if (settled) return;
+        settled = true;
+        resolve();
+      }
+      resumeWaiters.push(done);
+      document.addEventListener('visibilitychange', function onVis() {
+        if (document.visibilityState !== 'hidden') {
+          document.removeEventListener('visibilitychange', onVis);
+          done();
+        }
+      });
+      setTimeout(done, 120000);
+    });
+  }
+
+  function afterWalletReturn(ctx) {
+    var extra = ctx && ctx.resumeDelayMs != null ? ctx.resumeDelayMs : 350;
+    return waitForForeground(ctx).then(function () { return delay(extra); });
+  }
+
+  function fetchWithResumeRetry(url, options, ctx) {
+    var doFetch = (ctx && ctx.fetch) || fetch;
+    var tries = 0;
+    var max = (ctx && ctx.maxNetRetries) || 5;
+    function go() {
+      return Promise.resolve(doFetch(url, options)).catch(function (err) {
+        tries += 1;
+        if (!isTransientNetworkError(err) || tries > max) {
+          throw PayError(humanizeError(err), { code: 'network' });
+        }
+        if (ctx && ctx.onStatus) ctx.onStatus('reconnecting…');
+        var backoff = delay(200 * tries);
+        return waitForForeground(ctx).then(function () { return backoff; }).then(go);
+      });
+    }
+    return go();
+  }
+
   function PayError(message, extra) {
     var e = new Error(wrap.stripTwinHomework(message));
     e.name = 'PayError';
@@ -335,59 +460,120 @@
   }
 
   /**
-   * fetch url; on 402: live directory → holdings → wrap if needed → pay/build
-   * → partial-sign → X-PAYMENT. Never broadcasts the payment tx.
+   * fetch url; on 402: persist the challenge, live directory → holdings →
+   * wrap if needed → wait for MWA resume → pay/build (retried if the
+   * WebView dropped the socket) → partial-sign → X-PAYMENT.
+   * Never broadcasts the payment tx. Never surfaces raw "Load failed" /
+   * TypeError from the WebView.
    */
   function paidFetch(url, options, ctx) {
     ctx = ctx || {};
     var headers = Object.assign({ authorization: AUTH }, options && options.headers ? options.headers : {});
+    clearPending402(ctx);
 
     function once(extraHeaders) {
-      return fetch(url, Object.assign({}, options, {
+      return fetchWithResumeRetry(url, Object.assign({}, options, {
         headers: Object.assign({}, headers, extraHeaders || {})
-      }));
+      }), ctx);
     }
 
-    return once().then(function (res) {
-      if (res.status !== 402) return res;
-      if (!ctx.payer) {
-        throw PayError('Connect a wallet first — this call is paid from your wallet.');
-      }
-      return res.json().then(function (challenge) {
-        var read = ctx.fetchBalances || fetchBalances;
-        var dir = ctx.fetchSupported || wrap.fetchSupported;
-        if (ctx.onStatus) ctx.onStatus('checking this wallet…');
-        return Promise.all([
-          Promise.resolve(read(ctx.payer)),
-          Promise.resolve(dir())
-        ]).then(function (pair) {
-          var balances = pair[0];
-          var kinds = pair[1];
-          var plan = pickPayablePlan(challenge.accepts, balances, kinds);
-          if (!plan.ok) throw PayError(plan.reason, plan);
-          ctx.balances = balances;
-          return Promise.resolve(topUpIfNeeded(plan, ctx)).then(function () {
-            if (ctx.onStatus) ctx.onStatus('building payment…');
-            return fetch(GATEWAY + '/v1/pay/build', {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ accept: plan.accept, payer: ctx.payer })
-            }).then(function (builtRes) {
-              return builtRes.json().then(function (built) {
-                if (!builtRes.ok || !built.transaction) {
-                  throw PayError((built && (built.error || built.detail)) || 'payment build failed');
-                }
-                if (ctx.onStatus) ctx.onStatus('approve the payment in your wallet…');
-                return Promise.resolve(ctx.signTransaction(built.transaction)).then(function (signed) {
-                  if (!signed) throw PayError('wallet returned an empty signature');
-                  if (ctx.onStatus) ctx.onStatus('settling…');
-                  return once({ 'X-PAYMENT': encodePayment(built.envelope, signed) });
-                });
-              });
+    function persist(extra) {
+      var prev = loadPending402(ctx) || {};
+      return savePending402(Object.assign({}, prev, extra, {
+        url: url,
+        payer: ctx.payer
+      }), ctx);
+    }
+
+    function settle(envelope, signed) {
+      if (ctx.onStatus) ctx.onStatus('settling…');
+      persist({ step: 'settle', envelope: envelope, signedTx: signed });
+      return once({ 'X-PAYMENT': encodePayment(envelope, signed) }).then(function (res) {
+        clearPending402(ctx);
+        return res;
+      });
+    }
+
+    function buildAndPay(plan) {
+      persist({ step: 'build', accept: plan.accept, wrapDone: true, label: plan.label });
+      if (ctx.onStatus) ctx.onStatus('building payment…');
+      return fetchWithResumeRetry(GATEWAY + '/v1/pay/build', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ accept: plan.accept, payer: ctx.payer })
+      }, ctx).then(function (builtRes) {
+        return builtRes.json().then(function (built) {
+          if (!builtRes.ok || !built.transaction) {
+            throw PayError(humanizeError((built && (built.error || built.detail)) || 'Could not build the payment.'));
+          }
+          persist({
+            step: 'sign',
+            unsignedTx: built.transaction,
+            envelope: built.envelope,
+            accept: plan.accept
+          });
+          if (ctx.onStatus) ctx.onStatus('approve the payment in your wallet…');
+          return Promise.resolve(ctx.signTransaction(built.transaction)).then(function (signed) {
+            if (!signed) throw PayError('wallet returned an empty signature');
+            return afterWalletReturn(ctx).then(function () {
+              return settle(built.envelope, signed);
             });
           });
         });
       });
+    }
+
+    function fromChallenge(challenge) {
+      persist({ step: 'plan', challenge: challenge });
+      var pending = loadPending402(ctx);
+      var read = ctx.fetchBalances || fetchBalances;
+      var dir = ctx.fetchSupported || wrap.fetchSupported;
+      if (ctx.onStatus) ctx.onStatus('checking this wallet…');
+      return Promise.all([
+        Promise.resolve(read(ctx.payer)).catch(function (e) {
+          throw PayError(humanizeError(e), { code: 'balance-read-failed' });
+        }),
+        Promise.resolve(dir())
+      ]).then(function (pair) {
+        var balances = pair[0];
+        var kinds = pair[1];
+        var plan;
+        if (pending && pending.accept && pending.wrapDone) {
+          plan = { ok: true, accept: pending.accept, wrap: null, label: pending.label };
+        } else {
+          plan = pickPayablePlan(challenge.accepts, balances, kinds);
+        }
+        if (!plan.ok) throw PayError(plan.reason, plan);
+        ctx.balances = balances;
+        persist({
+          step: plan.wrap ? 'wrap' : 'build',
+          accept: plan.accept,
+          label: plan.label,
+          challenge: challenge
+        });
+        return Promise.resolve(topUpIfNeeded(plan, ctx)).then(function (sig) {
+          persist({ wrapDone: true, step: 'build' });
+          var wait = sig ? afterWalletReturn(ctx) : Promise.resolve();
+          return wait.then(function () { return buildAndPay(plan); });
+        });
+      });
+    }
+
+    return once().then(function (res) {
+      if (res.status !== 402) {
+        clearPending402(ctx);
+        return res;
+      }
+      if (!ctx.payer) {
+        throw PayError('Connect a wallet first — this call is paid from your wallet.');
+      }
+      return res.json().then(function (challenge) {
+        persist({ step: 'plan', challenge: challenge });
+        return fromChallenge(challenge);
+      });
+    }).catch(function (err) {
+      if (err && err.name === 'PayError') throw err;
+      throw PayError(humanizeError(err), { code: err && err.code });
     });
   }
 
@@ -406,7 +592,16 @@
     paidFetch: paidFetch,
     visibleHoldings: visibleHoldings,
     poolState: poolState,
-    topUpFromHoldings: topUpFromHoldings
+    topUpFromHoldings: topUpFromHoldings,
+    PENDING_KEY: PENDING_KEY,
+    savePending402: savePending402,
+    loadPending402: loadPending402,
+    clearPending402: clearPending402,
+    isTransientNetworkError: isTransientNetworkError,
+    humanizeError: humanizeError,
+    notifyResume: notifyResume,
+    afterWalletReturn: afterWalletReturn,
+    fetchWithResumeRetry: fetchWithResumeRetry
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

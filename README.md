@@ -35,8 +35,15 @@ Attach is abstract: you drop files, a folder, or notes. The app keeps a corpus w
 | app → shell | `wallet-disconnect` | exit and disconnect |
 | app → shell | `wallet-sign-transaction` | `{ id, transaction }` → `wallet-sign-transaction-response` |
 | app → shell | `wallet-sign-and-send-transaction` | wrap / top-up only → `wallet-sign-and-send-transaction-response` |
+| app → shell | `wallet-copy` | `{ id, text }` → native clipboard + `wallet-copy-response` |
+| app → shell | `wallet-paste` | `{ id }` → `wallet-paste-response` `{ text }` |
+| shell → app | `app-resume` | after MWA returns — retry pay/build |
 
 **402 pay** calls `MWA.signTransaction` only. Do not use `MWA.signAndSendTransaction` for settlement — the facilitator completes the feePayer slot. **Wrap / top-up may send.**
+
+Tap an address to copy it. Addresses are selectable. A toast says **copied**. Copy goes through Android `ClipboardManager` (`MWA.copyToClipboard`) because `navigator.clipboard` does not work in this Cordova WebView.
+
+This is **your** MWA wallet, not a local burner key. There is no burner on disk.
 
 ## Settlement
 
@@ -50,10 +57,10 @@ Then:
 402 → wrap if needed (may send) → POST /v1/pay/build → MWA.signTransaction → X-PAYMENT
 ```
 
-Gateway: `https://x402-tokens.fly.dev`. Payment is the auth.
+Gateway: `https://x402-tokens.fly.dev`. Payment is the auth. A 402 is persisted while Mobile Wallet Adapter backgrounds the app; `/v1/pay/build` retries after `resume`. Raw WebView `Load failed` / `TypeError` never reach the chat.
 
 ```bash
-npm run test:rails
+npm test
 ```
 
 What still needs a real phone is in [DEVICE.md](DEVICE.md).
