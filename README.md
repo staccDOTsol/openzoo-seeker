@@ -22,7 +22,9 @@ This repository is a fork of [FreeSolDev/CordovaSeeker](https://github.com/FreeS
 
 The shell owns the wallet. The chat iframe never sees a key.
 
-This phone build is **chat, bind, and stats only**. It does not implement RUN / WRITE / READ / SERVE — those need a desktop filesystem. `https://openzoo.fun` is a landing page, not a chat UI; do not iframe it.
+This phone build is **chat, bind, and stats only**. It does not implement RUN / WRITE / READ / SERVE — those need a desktop filesystem.
+
+Do **not** iframe `https://openzoo.fun` (landing page) or `https://chat.openzoo.fun` (Open WebUI + Wallet Standard / injected Phantom — in an iframe it shows “No Solana wallet detected” and does not speak `wallet-sign-transaction`). The bundled UI is trimmed from `www/app/gui.desktop.html`. Do not port grokui-app (Electron + `:8402`).
 
 Gateway (live, CORS-enabled): `https://x402-tokens.fly.dev`
 
@@ -52,14 +54,17 @@ Any `Authorization` string is accepted. **Payment is the auth.**
 
 ## Settlement rails
 
-A 402 lists several `accepts` rows (typically Solana + eip155). Seeker **only** picks a Solana row, and only after reading token balances via JSON-RPC `getTokenAccountsByOwner` (no Solana libraries on device).
+A 402 lists several `accepts` rows (typically Solana + eip155). Seeker filters to `network.startsWith('solana:')` and maps the user's **USDC / TOKEN / LEOS** button onto the matching `extra.symbol` / `asset`. It never silently takes `accepts[0]`. Screen copy never says the settlement twin names.
 
-Solana rows settle in NAV-wrapped Token-2022 twins, not plain USDC:
+On-screen / funding mints (what the user holds):
 
-- `yUSDCx` (`6ZjjxcoicqM4nniddkuPVwew4PDwY3swbfHsGbCuLuTv`) wraps USDC
-- `wTOKENx` (`FXYkwMtfKpA174rp8ixVeiGs5TYGaBsYRrHE3KrR449B`) wraps TOKEN (`EVULoNF4DeMBN4dGiZiDfpiiTfNZgoCvXWWgaV3epump`)
+| button | underlying |
+|---|---|
+| USDC | `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` |
+| TOKEN | `EVULoNF4DeMBN4dGiZiDfpiiTfNZgoCvXWWgaV3epump` |
+| LEOS | `5xgsnby6P9zqGK71J7H4yJLxzqPvNbC7rDZxNzjHmj7e` (only if a Solana accept row exists) |
 
-If the wallet only holds unwrapped USDC/TOKEN (or nothing payable), the app **steers in-app** and will not silently `POST /v1/pay/build` against yUSDCx. Wrap-on-the-fly is out of scope here.
+`/v1/pay/build` was decoded live on 2026-08-20 as **transfer-only** (ComputeBudget + Token-2022 TransferChecked). It does not assemble wrap+transfer, despite `chat.openzoo.fun` `loader.js` claiming that. If the wallet cannot cover the quoted settlement mint, the app steers **“Fund this wallet with USDC / TOKEN”** and will not wrap on device.
 
 Rail-picker unit tests (no device required):
 

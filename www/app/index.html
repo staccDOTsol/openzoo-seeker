@@ -59,6 +59,12 @@
     background: var(--warn-bg); color: var(--warn); border-bottom: 1px solid #ead8a6; }
   #banner.show { display: block; }
   .actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .rails { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .rail { background: var(--paper); border: 1px solid var(--line); border-radius: 12px;
+    padding: 6px 10px; cursor: pointer; display: flex; flex-direction: column; align-items: flex-start; min-width: 72px; }
+  .rail .lbl { font-weight: 700; font-size: 13px; }
+  .rail .ca { font-size: 10px; color: var(--muted); }
+  .rail.on { color: var(--leaf); border-color: var(--leaf); background: var(--leaf-soft); }
 </style>
 </head>
 <body data-component="app">
@@ -74,6 +80,7 @@
     <button class="ghost" id="brainBtn" data-component="brain-toggle">🧠 bind</button>
     <button class="ghost" id="newBtn" data-component="new-chat" title="fresh session">✨ new</button>
     <span class="chip" id="ctxChip" data-component="ctx-chip" style="display:none"></span>
+    <div class="rails" id="rails" data-component="rail-picker"></div>
   </div>
 </header>
 
@@ -94,7 +101,7 @@
 <div id="chat" data-component="chat-scroll">
   <div class="row" data-row="welcome"><div class="bubble zoo" data-role="welcome-bubble">welcome to the zoo 🦁 — pick a model, say anything.
 paste a corpus with 🧠 and ask against it. this phone build is chat, bind, and stats only.
-settlement is yUSDCx / wTOKENx (wrapped Token-2022 twins), not plain USDC.</div></div>
+pay with USDC / TOKEN / LEOS from the connected wallet.</div></div>
 </div>
 
 <footer data-component="composer-bar">
@@ -123,6 +130,32 @@ const state = Object.assign(
 const wallet = { address: null, method: null };
 const pendingSigns = new Map();
 let signSeq = 1;
+let preferredRail = "USDC";
+
+function shortMint(mint) {
+  return mint.slice(0, 4) + "…" + mint.slice(-4);
+}
+
+function renderRails() {
+  const host = $("rails");
+  if (!host) return;
+  host.innerHTML = "";
+  ["USDC", "TOKEN", "LEOS"].forEach((label) => {
+    const spec = OpenZooPay.RAILS[label];
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "rail" + (preferredRail === label ? " on" : "");
+    b.setAttribute("data-rail", label);
+    b.setAttribute("data-component", "openzoo-pay-with-" + label.toLowerCase());
+    b.title = "pay with " + label + " · mint " + spec.underlying;
+    b.innerHTML = '<span class="lbl">' + label + '</span><span class="ca">' + shortMint(spec.underlying) + "</span>";
+    b.onclick = () => {
+      preferredRail = label;
+      renderRails();
+    };
+    host.appendChild(b);
+  });
+}
 
 function persist() {
   const { messages, ctx, spent, saved, calls } = state;
@@ -166,6 +199,7 @@ function payCtx() {
   return {
     payer: wallet.address,
     signTransaction,
+    preferredRail,
     onStatus: setBanner,
   };
 }
@@ -379,6 +413,7 @@ $("corpus").addEventListener("drop", async (e) => {
   if (f) $("corpus").value = await f.text();
 });
 $("corpus").addEventListener("dragover", (e) => e.preventDefault());
+renderRails();
 loadModels();
 loadStats();
 </script>
