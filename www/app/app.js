@@ -58,7 +58,7 @@
       ? Race.parseRaceValue((saved && saved.race != null)
         ? Race.raceSelectValue(saved.race, saved.raceNeed)
         : (Race.DEFAULT_NEED + ' ' + Race.DEFAULT_N))
-      : { race: 4, raceNeed: 2 };
+      : { race: 0, raceNeed: 1 };
     return {
       tier: (Race && Race.normalizeTier(saved && saved.tier)) || 'medium',
       race: parsed.race,
