@@ -999,6 +999,9 @@
   }
 
   render();
+  // Chrome is painted. Do not wait on fly.dev /v1/models — dismiss the
+  // shell's #oz-boot overlay now, then fetch the catalog in the background.
+  try { parent.postMessage({ type: 'openzoo-chrome-ready' }, '*'); } catch (_) {}
   loadModels();
 
   document.addEventListener('visibilitychange', function () {

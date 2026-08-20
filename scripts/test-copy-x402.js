@@ -238,6 +238,45 @@ async function run() {
     assert.strictEqual(wrap.WTOKENX2, 'FXYkwMtfKpA174rp8ixVeiGs5TYGaBsYRrHE3KrR449B');
   });
 
+  await check('dark launch loader covers iframe black and waits for chrome, not models', () => {
+    const shell = read('www/index.html');
+    const appJs = read('www/app/app.js');
+
+    const afterBody = shell.split(/<body[^>]*>/)[1] || '';
+    assert.match(afterBody.trim(), /^<div id="oz-boot"/);
+    assert.match(shell, /#oz-boot[\s\S]*?z-index:\s*10000/);
+    assert.match(shell, /#oz-boot[\s\S]*?background:\s*(#000|#0a0a18)/);
+    assert.match(shell, />\s*starting\s*<span class="oz-d">/);
+    const bootMarkup = shell.match(/id="oz-boot"[^>]*>[\s\S]*?<\/div>/);
+    assert.ok(bootMarkup, '#oz-boot markup');
+    assert.doesNotMatch(bootMarkup[0], /logo|icon-192|OPENZOO/i);
+
+    const launch = shell.match(/function launchGame\(\)[\s\S]*?log\('Loading openzoo iframe/);
+    assert.ok(launch, 'launchGame body');
+    assert.match(launch[0], /showBoot\(\)/);
+    assert.doesNotMatch(launch[0], /hideBoot\(\)/);
+    assert.match(shell, /document\.addEventListener\('DOMContentLoaded',\s*hideBoot\)/);
+    assert.match(shell, /setTimeout\(hideBoot,\s*50\)/);
+    assert.match(shell, /setTimeout\(hideBoot,\s*4000\)/);
+    assert.match(shell, /data\.type === 'openzoo-chrome-ready'/);
+
+    const chrome = appJs.match(
+      /render\(\);\s*(?:\/\/[^\n]*\n\s*)*try \{ parent\.postMessage\(\{ type: 'openzoo-chrome-ready' \}/
+    );
+    assert.ok(chrome, 'chrome-ready after first render()');
+    const renderAt = appJs.lastIndexOf('  render();\n  // Chrome is painted');
+    const readyAt = appJs.indexOf("parent.postMessage({ type: 'openzoo-chrome-ready' }");
+    const modelsAt = appJs.lastIndexOf('  loadModels();');
+    assert.ok(renderAt > 0 && readyAt > renderAt && modelsAt > readyAt,
+      'first render() → chrome-ready → loadModels()');
+    assert.doesNotMatch(appJs, /await loadModels\(\)/);
+
+    assert.match(shell, /MWA\.authorize/);
+    assert.match(shell, /MWA\.signTransaction/);
+    assert.match(shell, /wallet-sign-transaction/);
+    assert.match(appJs, /OpenZooPay\.paidFetch/);
+  });
+
   await check('chat completions spill the prefix instead of dumping the thread', () => {
     const appJs = read('www/app/app.js');
     const spillJs = read('www/app/spill.js');

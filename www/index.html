@@ -103,9 +103,35 @@
       font-size: 10px; letter-spacing: 2px;
       color: #fff;
     }
+
+    /* Dark launch loader — covers native-splash → chrome gap. No logo. */
+    #oz-boot {
+      position: fixed; inset: 0; z-index: 10000;
+      background: #0a0a18;
+      display: flex; align-items: center; justify-content: center;
+      color: rgba(255,255,255,0.72);
+      font-family: monospace; font-size: 13px; letter-spacing: 0.2em;
+      text-transform: lowercase;
+    }
+    #oz-boot.oz-boot-off { display: none; }
+    #oz-boot .oz-d {
+      display: inline-block; width: 0.55em;
+      animation: oz-boot-dot 1.2s infinite;
+      opacity: 0;
+    }
+    #oz-boot .oz-d:nth-of-type(1) { animation-delay: 0s; }
+    #oz-boot .oz-d:nth-of-type(2) { animation-delay: 0.2s; }
+    #oz-boot .oz-d:nth-of-type(3) { animation-delay: 0.4s; }
+    @keyframes oz-boot-dot {
+      0%, 20% { opacity: 0; }
+      30%, 100% { opacity: 1; }
+    }
   </style>
 </head>
 <body>
+  <div id="oz-boot" role="status" aria-live="polite" aria-busy="true">
+    starting<span class="oz-d">.</span><span class="oz-d">.</span><span class="oz-d">.</span>
+  </div>
   <img class="logo" src="icon-192.png" alt="OpenZoo" data-component="logo" width="120" height="120">
   <div class="title" data-component="title">OPENZOO</div>
   <div class="divider" data-component="divider"></div>
@@ -158,6 +184,32 @@
 
   function log(msg) {
     console.log('[wallet-shell] ' + msg);
+  }
+
+  var $boot = document.getElementById('oz-boot');
+  var bootHideTimer = null;
+
+  function showBoot() {
+    if (!$boot) return;
+    $boot.classList.remove('oz-boot-off');
+    $boot.setAttribute('aria-busy', 'true');
+    if (bootHideTimer) { clearTimeout(bootHideTimer); bootHideTimer = null; }
+  }
+
+  function hideBoot() {
+    if (!$boot) return;
+    $boot.classList.add('oz-boot-off');
+    $boot.setAttribute('aria-busy', 'false');
+    if (bootHideTimer) { clearTimeout(bootHideTimer); bootHideTimer = null; }
+  }
+
+  function armBootFallback(iframe) {
+    iframe.addEventListener('load', function onBootLoad() {
+      iframe.removeEventListener('load', onBootLoad);
+      setTimeout(hideBoot, 50);
+    });
+    if (bootHideTimer) clearTimeout(bootHideTimer);
+    bootHideTimer = setTimeout(hideBoot, 4000);
   }
 
   function setStatus(msg) { $status.textContent = msg; }
@@ -239,6 +291,9 @@
   }
 
   function launchGame() {
+    // Keep the dark loader up while the empty iframe is black.
+    // Do not hide here — chrome-ready (or the fallback) dismisses it.
+    showBoot();
     $picker.style.display = 'none';
     $connected.style.display = 'none';
 
@@ -268,11 +323,13 @@
       });
     }
 
+    armBootFallback(iframe);
     iframe.src = GAME_URL;
     log('Loading openzoo iframe...');
   }
 
   function closeIframe() {
+    hideBoot();
     var iframe = document.getElementById('game');
     if (iframe) iframe.remove();
     if (connectedAddress) {
@@ -295,6 +352,7 @@
 
     // Destroy iframe completely
     if (iframe) iframe.remove();
+    hideBoot();
 
     $picker.style.display = 'flex';
     $connected.style.display = 'none';
@@ -341,6 +399,11 @@
     if (!gameFrame || event.source !== gameFrame.contentWindow) return;
     var data = event.data;
     if (!data || !data.type) return;
+
+    if (data.type === 'openzoo-chrome-ready') {
+      log('Chrome ready — dismissing boot overlay');
+      hideBoot();
+    }
 
     if (data.type === 'wallet-disconnect') {
       log('App requested disconnect');
@@ -447,6 +510,14 @@
      Init
      ═══════════════════════════════════════════════ */
   log('Shell loaded');
+
+  // First-run CONNECT: drop the loader so the user can tap CONNECT.
+  // Post-authorize skip calls launchGame() and re-shows until chrome-ready.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', hideBoot);
+  } else {
+    hideBoot();
+  }
 
   $addr.addEventListener('click', copyAddress);
 
