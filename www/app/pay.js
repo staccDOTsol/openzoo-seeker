@@ -289,7 +289,24 @@
     if (ctx.onStatus) ctx.onStatus('approve the top-up in your wallet…');
     var sig = await ctx.signAndSendTransaction(built.transaction);
     if (!sig) throw PayError('Top-up was not approved.');
+    await confirmSignature(sig);
     return sig;
+  }
+
+  function confirmSignature(signature) {
+    var deadline = Date.now() + 90000;
+    function once() {
+      return rpcCall('getSignatureStatuses', [[signature]]).then(function (res) {
+        var st = res && res.value && res.value[0];
+        if (st && st.err) throw PayError('Top-up failed on-chain.');
+        if (st && (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized')) {
+          return signature;
+        }
+        if (Date.now() >= deadline) throw PayError('Top-up is taking too long. Try the call again.');
+        return new Promise(function (resolve) { setTimeout(resolve, 1500); }).then(once);
+      });
+    }
+    return once();
   }
 
   async function topUpFromHoldings(payer, signAndSendTransaction, onStatus) {
