@@ -1,4 +1,7 @@
-/* grokui-on-a-phone: threads + chat + wallet. Bind is attach-only and silent. */
+/* grokui-on-a-phone: threads + chat + wallet.
+   Attach binds files. Chat spills the transcript prefix (Claude / npx openzoo
+   claude path) and later turns send a short tail + context id — never the
+   growing thread together with x-hrr-context. */
 (function () {
   'use strict';
 
@@ -38,8 +41,10 @@
       color: COLORS[state.threads.length % COLORS.length],
       messages: [],
       spent: 0,
+      directUsd: 0,
       calls: 0,
       memory: null,
+      spillCorpus: '',
       preview: ''
     };
     state.threads.unshift(t);
@@ -346,6 +351,26 @@
     $('walletBtn').textContent = wallet.address
       ? (wallet.address.slice(0, 4) + '…' + wallet.address.slice(-4))
       : 'wallet';
+    renderHud();
+  }
+
+  function renderHud() {
+    var el = $('hudChip');
+    if (!el || !window.OpenZooSpill) return;
+    var t = active();
+    var spent = Number(t.spent) || 0;
+    var direct = Number(t.directUsd) || 0;
+    var mult = OpenZooSpill.hudSavingX(direct, spent);
+    if (spent <= 0) {
+      el.textContent = '';
+      el.hidden = true;
+      return;
+    }
+    el.hidden = false;
+    el.textContent = '$' + spent.toFixed(4) + (mult ? ' · ' + OpenZooSpill.formatSavingX(mult) : '');
+    el.title = mult
+      ? ('direct $' + direct.toFixed(4) + ' / spent $' + spent.toFixed(4))
+      : ('spent $' + spent.toFixed(4));
   }
 
   function renderLog() {
@@ -446,12 +471,24 @@
     return parts.join('\n\n');
   }
 
-  async function attachQuietly(thread, corpus) {
-    if (!corpus || !corpus.trim()) return thread.memory || null;
-    setBanner('attaching…');
-    var body = thread.memory
-      ? { corpus: corpus, context_id: thread.memory }
-      : { corpus: corpus };
+  function completedHistory(thread) {
+    return thread.messages.filter(function (m, i) {
+      return !(i === thread.messages.length - 1 && m.role === 'assistant' && m.content === '…');
+    }).map(function (m) { return { role: m.role, content: m.content }; });
+  }
+
+  async function bindCorpus(thread, corpus, opts) {
+    opts = opts || {};
+    if (!corpus || !String(corpus).trim()) return thread.memory || null;
+    if (!opts.silent) setBanner(opts.label || 'attaching…');
+    var spec = opts.chat
+      ? OpenZooSpill.nextBindBody(thread, corpus)
+      : (thread.memory
+        ? { corpus: corpus, context_id: thread.memory, append: true }
+        : { corpus: corpus, append: false });
+    var body = (spec.append && thread.memory)
+      ? { corpus: spec.corpus, context_id: thread.memory }
+      : { corpus: spec.corpus };
     var r = await OpenZooPay.paidFetch(GATEWAY + '/v1/hrr/bind', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -462,14 +499,57 @@
       var gone = r.status === 404 && /context_not_found/.test(JSON.stringify(d));
       if (gone && thread.memory) {
         thread.memory = null;
-        return attachQuietly(thread, corpus);
+        thread.spillCorpus = '';
+        return bindCorpus(thread, corpus, opts);
       }
-      throw new Error((d && (d.error && d.error.message || d.error || d.message)) || 'Could not attach those notes.');
+      throw new Error((d && (d.error && d.error.message || d.error || d.message)) || 'Could not keep that with this thread.');
     }
     if (d.context_id) thread.memory = d.context_id;
+    if (opts.chat) thread.spillCorpus = corpus;
     saveStore();
-    setBanner('');
+    if (!opts.silent) setBanner('');
     return thread.memory;
+  }
+
+  async function attachQuietly(thread, corpus) {
+    return bindCorpus(thread, corpus, { label: 'attaching…' });
+  }
+
+  async function spillPrefix(thread, corpus) {
+    return bindCorpus(thread, corpus, { chat: true, silent: true });
+  }
+
+  async function postChat(thread, history, retried) {
+    var planned = OpenZooSpill.planChatSpill(history, thread);
+    if (planned.bind && planned.corpus) {
+      try {
+        await spillPrefix(thread, planned.corpus);
+      } catch (e) {
+        if (!thread.memory) throw e;
+      }
+      planned = OpenZooSpill.planChatSpill(history, thread);
+    }
+    var headers = OpenZooSpill.chatHeaders(planned.contextId);
+    OpenZooSpill.assertNoFullDump(headers, planned.messages, history.length);
+    var maxTok = /deepseek|grok|thinking|fable|sonnet-5|-r1|reason/i.test($('model').value) ? 16384 : 4096;
+    var r = await OpenZooPay.paidFetch(GATEWAY + '/v1/chat/completions', {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify({
+        model: $('model').value,
+        messages: planned.messages,
+        max_tokens: maxTok
+      })
+    }, payCtx());
+    var d = await r.json();
+    if (r.status === 404 && /context_not_found/.test(JSON.stringify(d)) && !retried) {
+      thread.memory = null;
+      thread.spillCorpus = '';
+      var fresh = OpenZooSpill.planChatSpill(history, thread);
+      if (fresh.corpus) await spillPrefix(thread, fresh.corpus);
+      return postChat(thread, history, true);
+    }
+    return { r: r, d: d, planned: planned };
   }
 
   async function submit() {
@@ -495,36 +575,10 @@
     render();
     try {
       if (corpus) await attachQuietly(t, corpus);
-      var headers = { 'content-type': 'application/json' };
-      if (t.memory) headers['x-hrr-context'] = t.memory;
-      var history = t.messages.filter(function (m, i) {
-        return !(i === t.messages.length - 1 && m.role === 'assistant');
-      }).map(function (m) { return { role: m.role, content: m.content }; });
-      var r = await OpenZooPay.paidFetch(GATEWAY + '/v1/chat/completions', {
-        method: 'POST',
-        headers: headers,
-        body: JSON.stringify({
-          model: $('model').value,
-          messages: history,
-          max_tokens: /deepseek|grok|thinking|fable|sonnet-5|-r1|reason/i.test($('model').value) ? 16384 : 4096
-        })
-      }, payCtx());
-      var d = await r.json();
-      if (r.status === 404 && /context_not_found/.test(JSON.stringify(d)) && corpus) {
-        t.memory = null;
-        await attachQuietly(t, corpus);
-        headers['x-hrr-context'] = t.memory;
-        r = await OpenZooPay.paidFetch(GATEWAY + '/v1/chat/completions', {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify({
-            model: $('model').value,
-            messages: history,
-            max_tokens: 4096
-          })
-        }, payCtx());
-        d = await r.json();
-      }
+      var history = completedHistory(t);
+      var posted = await postChat(t, history);
+      var r = posted.r;
+      var d = posted.d;
       if (!r.ok) {
         var msg = OpenZooPay.humanizeError((d.error && d.error.message) || d.error || d.message || ('HTTP ' + r.status));
         t.messages.pop();
@@ -536,10 +590,18 @@
         var content = (ch && ch.message && ch.message.content) || '';
         if (!content) content = 'the zoo returned an empty reply.';
         var x = d.x402 || {};
-        t.calls += 1;
-        if (typeof x.billedUsd === 'number') t.spent += x.billedUsd;
+        if (typeof t.directUsd !== 'number') t.directUsd = 0;
+        var receipt = OpenZooSpill.noteReceipt({
+          spentUsd: t.spent,
+          directUsd: t.directUsd,
+          calls: t.calls
+        }, x);
+        t.spent = receipt.spentUsd;
+        t.directUsd = receipt.directUsd;
+        t.calls = receipt.calls;
         var bits = [];
         if (typeof x.billedUsd === 'number') bits.push('$' + x.billedUsd.toFixed(4));
+        if (receipt.savingX) bits.push(OpenZooSpill.formatSavingX(receipt.savingX));
         t.messages.pop();
         t.messages.push({ role: 'assistant', content: content, meta: bits.join(' · ') });
         t.preview = content.slice(0, 80);
