@@ -120,7 +120,7 @@
 
   <div id="connected" data-component="connected-panel">
     <div class="lbl" data-component="connected-label">CONNECTED</div>
-    <div class="addr" id="addr" data-component="wallet-address" title="Tap to copy"></div>
+    <div class="addr copyable" id="addr" data-component="wallet-address" title="Tap to copy"></div>
     <div class="addr-hint">tap address to copy · select also works</div>
     <button class="btn primary" onclick="launchGame()" style="margin-top:22px;" data-testid="play-button">
       open zoo
@@ -144,7 +144,7 @@
   var connectedAddress = null;   // wallet address after connect
   var connectedMethod  = null;   // 'MWA'
   // Bundled grokui-on-a-phone UI (threads / chat / wallet).
-  // Do NOT set this to https://chat.openzoo.fun or :8402.
+  // Do NOT point this at chat.openzoo.fun or a local sidecar.
   var GAME_URL    = 'app/index.html';
   var GAME_ORIGIN = '*'; // local file — no meaningful origin; use event.source check instead
 

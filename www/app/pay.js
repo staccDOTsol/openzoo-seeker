@@ -44,9 +44,21 @@
     return wrap.userLabelFor(raw, row && row.asset);
   }
 
+  var COPY = {
+    wrap: function (label) {
+      return 'You have ' + (label || 'TOKEN') + '. Wrap enough to send this?';
+    },
+    shortSol: 'Needs a little SOL for the network fee',
+    shortTokens: 'Send TOKEN, USDC, or LEOS to this wallet.',
+    copied: 'Copied',
+    wrapCancelled: 'Wrap cancelled.'
+  };
+
   function fundMessage() {
-    return 'Add USDC, TOKEN, or LEOS to this wallet to pay.';
+    return COPY.shortTokens;
   }
+
+  var MIN_WRAP_SOL = 3000000n;
 
   function mergeMintMaps() {
     var out = {};
@@ -173,12 +185,13 @@
   }
 
   /**
-   * Ez-mode: pick the Solana row this wallet can actually cover, wrapping
-   * TOKEN / USDC / LEOS (or the live twin) behind the scenes.
+   * Ez-mode picker. Gate wrap on held underlying > 0. NEVER compare
+   * underlying raw 1:1 to twin maxAmountRequired — $10 TOKEN is useful
+   * even when the quoted twin raw is larger. Sufficiency is depositForShares.
    */
-  function pickPayablePlan(accepts, balances, kinds) {
+  function pickLargestUseful(accepts, balances, kinds) {
     if (!balances || typeof balances !== 'object') {
-      return { ok: false, code: 'no-balances', reason: 'Could not read this wallet.' };
+      return { ok: false, code: 'no-balances', reason: 'Could not read this wallet.', prompt: 'short-tokens' };
     }
     var sol = solanaAccepts(accepts);
     if (!sol.length) {
@@ -188,7 +201,11 @@
     var ranked = sol.map(function (row) {
       var score = holdingScore(row, balances, kinds);
       return { row: row, score: score };
-    }).sort(function (a, b) { return b.score.prefer - a.score.prefer; });
+    }).sort(function (a, b) {
+      if (b.score.prefer !== a.score.prefer) return b.score.prefer - a.score.prefer;
+      if (b.score.haveUnder === a.score.haveUnder) return 0;
+      return b.score.haveUnder > a.score.haveUnder ? 1 : -1;
+    });
 
     for (var i = 0; i < ranked.length; i++) {
       var row = ranked[i].row;
@@ -217,11 +234,44 @@
           sharesNeeded: short.toString(),
           from: wrap.userLabelFor(pool.underlyingSymbol, pool.underlying)
         },
-        label: displaySymbol(accept)
+        label: displaySymbol(accept),
+        prompt: 'wrap',
+        promptCopy: COPY.wrap(wrap.userLabelFor(pool.underlyingSymbol, pool.underlying))
       };
     }
 
-    return { ok: false, code: 'no-balance', reason: fundMessage() };
+    return {
+      ok: false,
+      code: 'no-balance',
+      reason: fundMessage(),
+      prompt: 'short-tokens',
+      promptCopy: COPY.shortTokens
+    };
+  }
+
+  function pickPayablePlan(accepts, balances, kinds) {
+    return pickLargestUseful(accepts, balances, kinds);
+  }
+
+  function fetchSolBalance(owner) {
+    return rpcCall('getBalance', [owner]).then(function (r) {
+      return { ok: true, lamports: toBig(r && (r.value != null ? r.value : r)) };
+    }).catch(function () { return { ok: false, lamports: 0n }; });
+  }
+
+  function looksNoSol(text) {
+    var s = String(text || '').toLowerCase();
+    return /no sol|insufficient.*lamports|insufficient funds for (rent|fee)|need .*sol\b|0x1\b.*lamport/.test(s);
+  }
+
+  function looksUnderfunded(text) {
+    var s = String(text || '').toLowerCase();
+    return /insufficient|underfund|not enough|0x1\b|custom program error: 1|simulation failed|failed_settle|insufficientfunds|no token account/.test(s);
+  }
+
+  function looksBackgrounded(text) {
+    var s = String(text || '').toLowerCase();
+    return /timed out|timeout|background|session (closed|destroyed|lost)|activity|interrupted|canceled|cancelled|user rejected/.test(s);
   }
 
   function encodePayment(envelope, signedTxB64) {
@@ -362,13 +412,35 @@
   }
 
   function PayError(message, extra) {
+    extra = extra || {};
     var e = new Error(wrap.stripTwinHomework(message));
     e.name = 'PayError';
-    if (extra) {
-      e.code = extra.code;
-      e.details = extra.details;
-    }
+    e.code = extra.code;
+    e.details = extra.details;
+    e.prompt = extra.prompt || extra.code;
+    e.promptCopy = extra.promptCopy || message;
+    e.address = extra.address;
+    e.holdings = extra.holdings;
     return e;
+  }
+
+  function shortTokensError(ctx, balances, kinds) {
+    return PayError(COPY.shortTokens, {
+      code: 'short-tokens',
+      prompt: 'short-tokens',
+      promptCopy: COPY.shortTokens,
+      address: ctx && ctx.payer,
+      holdings: visibleHoldings(balances, kinds)
+    });
+  }
+
+  function shortSolError(ctx) {
+    return PayError(COPY.shortSol, {
+      code: 'short-sol',
+      prompt: 'short-sol',
+      promptCopy: COPY.shortSol,
+      address: ctx && ctx.payer
+    });
   }
 
   function visibleHoldings(balances, kinds) {
@@ -395,6 +467,17 @@
     try { return wrap.solanaKinds(kinds); } catch (_) { return []; }
   }
 
+  async function confirmWrapIfNeeded(plan, ctx) {
+    if (!plan || !plan.wrap) return true;
+    var label = plan.wrap.from || plan.label || 'TOKEN';
+    if (!ctx || !ctx.confirmWrap) return true;
+    return Promise.resolve(ctx.confirmWrap({
+      label: label,
+      message: COPY.wrap(label),
+      plan: plan
+    })).then(function (ok) { return ok !== false; });
+  }
+
   async function topUpIfNeeded(plan, ctx) {
     if (!plan.wrap) return;
     var pool = plan.wrap.pool;
@@ -403,7 +486,19 @@
     var deposit = wrap.depositForShares(plan.wrap.sharesNeeded, state.reserves, state.supply);
     var haveUnder = toBig(ctx.balances && ctx.balances[pool.underlying]);
     if (haveUnder < deposit) {
-      throw PayError(fundMessage(), { code: 'underfunded' });
+      throw shortTokensError(ctx, ctx.balances, ctx.kinds);
+    }
+    var solKnown = ctx.solKnown === true;
+    var sol = toBig(ctx.solLamports);
+    if (ctx.solLamports == null) {
+      var solRead = await fetchSolBalance(ctx.payer);
+      sol = solRead.lamports;
+      solKnown = solRead.ok;
+      ctx.solLamports = sol.toString();
+      ctx.solKnown = solKnown;
+    }
+    if (solKnown && sol < MIN_WRAP_SOL) {
+      throw shortSolError(ctx);
     }
     var blockhash = await latestBlockhash();
     if (!blockhash) throw PayError('Could not prepare a top-up.');
@@ -412,10 +507,20 @@
       throw PayError('This wallet cannot top up from here.');
     }
     if (ctx.onStatus) ctx.onStatus('approve the top-up in your wallet…');
-    var sig = await ctx.signAndSendTransaction(built.transaction);
-    if (!sig) throw PayError('Top-up was not approved.');
-    await confirmSignature(sig);
-    return sig;
+    try {
+      var sig = await ctx.signAndSendTransaction(built.transaction);
+      if (!sig) throw PayError('Top-up was not approved.');
+      await confirmSignature(sig);
+      return sig;
+    } catch (e) {
+      var msg = e && e.message ? e.message : String(e);
+      if (e && e.prompt) throw e;
+      if (looksNoSol(msg)) throw shortSolError(ctx);
+      if (looksUnderfunded(msg) && !looksBackgrounded(msg) && !isTransientNetworkError(e)) {
+        throw shortTokensError(ctx, ctx.balances, ctx.kinds);
+      }
+      throw e;
+    }
   }
 
   function confirmSignature(signature) {
@@ -446,14 +551,21 @@
         extra: { symbol: k.extra.symbol, decimals: k.extra.decimals }
       };
     });
-    var plan = pickPayablePlan(fake, balances, kinds);
+    var plan = pickLargestUseful(fake, balances, kinds);
     if (!plan.ok) throw PayError(plan.reason, plan);
     if (!plan.wrap) return { wrapped: false, reason: 'ready' };
-    return topUpIfNeeded(plan, {
+    var extras = (onStatus && typeof onStatus === 'object') ? onStatus : { onStatus: onStatus };
+    var ctx = {
       payer: payer,
       balances: balances,
+      kinds: kinds,
       signAndSendTransaction: signAndSendTransaction,
-      onStatus: onStatus
+      onStatus: extras.onStatus || (typeof onStatus === 'function' ? onStatus : null),
+      confirmWrap: extras.confirmWrap
+    };
+    return confirmWrapIfNeeded(plan, ctx).then(function (ok) {
+      if (!ok) throw PayError(COPY.wrapCancelled, { code: 'wrap-cancelled' });
+      return topUpIfNeeded(plan, ctx);
     }).then(function (sig) {
       return { wrapped: true, signature: sig };
     });
@@ -541,20 +653,35 @@
         if (pending && pending.accept && pending.wrapDone) {
           plan = { ok: true, accept: pending.accept, wrap: null, label: pending.label };
         } else {
-          plan = pickPayablePlan(challenge.accepts, balances, kinds);
+          plan = pickLargestUseful(challenge.accepts, balances, kinds);
         }
-        if (!plan.ok) throw PayError(plan.reason, plan);
+        if (!plan.ok) {
+          throw PayError(plan.reason, {
+            code: plan.code,
+            prompt: plan.prompt || (plan.code === 'no-balance' ? 'short-tokens' : plan.code),
+            promptCopy: plan.promptCopy || plan.reason,
+            address: ctx.payer,
+            holdings: visibleHoldings(balances, kinds)
+          });
+        }
         ctx.balances = balances;
+        ctx.kinds = kinds;
         persist({
           step: plan.wrap ? 'wrap' : 'build',
           accept: plan.accept,
           label: plan.label,
           challenge: challenge
         });
-        return Promise.resolve(topUpIfNeeded(plan, ctx)).then(function (sig) {
-          persist({ wrapDone: true, step: 'build' });
-          var wait = sig ? afterWalletReturn(ctx) : Promise.resolve();
-          return wait.then(function () { return buildAndPay(plan); });
+        return Promise.resolve(confirmWrapIfNeeded(plan, ctx)).then(function (ok) {
+          if (!ok) {
+            clearPending402(ctx);
+            throw PayError(COPY.wrapCancelled, { code: 'wrap-cancelled' });
+          }
+          return Promise.resolve(topUpIfNeeded(plan, ctx)).then(function (sig) {
+            persist({ wrapDone: true, step: 'build' });
+            var wait = sig ? afterWalletReturn(ctx) : Promise.resolve();
+            return wait.then(function () { return buildAndPay(plan); });
+          });
         });
       });
     }
@@ -585,8 +712,12 @@
     toBig: toBig,
     solanaAccepts: solanaAccepts,
     displaySymbol: displaySymbol,
+    COPY: COPY,
+    MIN_WRAP_SOL: MIN_WRAP_SOL,
     fundMessage: fundMessage,
     fetchBalances: fetchBalances,
+    fetchSolBalance: fetchSolBalance,
+    pickLargestUseful: pickLargestUseful,
     pickPayablePlan: pickPayablePlan,
     encodePayment: encodePayment,
     paidFetch: paidFetch,
@@ -601,7 +732,10 @@
     humanizeError: humanizeError,
     notifyResume: notifyResume,
     afterWalletReturn: afterWalletReturn,
-    fetchWithResumeRetry: fetchWithResumeRetry
+    fetchWithResumeRetry: fetchWithResumeRetry,
+    looksNoSol: looksNoSol,
+    looksUnderfunded: looksUnderfunded,
+    looksBackgrounded: looksBackgrounded
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
