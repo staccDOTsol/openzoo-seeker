@@ -2,6 +2,9 @@ package fun.openzoo.seeker;
 
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.util.Base64;
@@ -55,7 +58,60 @@ public class MWAPlugin extends CordovaPlugin {
             cordova.getThreadPool().execute(() -> doSignAndSendTransaction(txB64, callbackContext));
             return true;
         }
+        if ("copyToClipboard".equals(action)) {
+            final String text = args.optString(0, "");
+            copyToClipboard(text, callbackContext);
+            return true;
+        }
+        if ("readClipboard".equals(action)) {
+            readClipboard(callbackContext);
+            return true;
+        }
         return false;
+    }
+
+    /**
+     * Real Android clipboard. navigator.clipboard is blocked in the Cordova
+     * WebView (file:// / no clipboard-write permission), so copy/paste of
+     * addresses has to go through ClipboardManager.
+     */
+    private void copyToClipboard(final String text, final CallbackContext cb) {
+        final Activity activity = cordova.getActivity();
+        activity.runOnUiThread(() -> {
+            try {
+                ClipboardManager cm = (ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
+                if (cm == null) {
+                    cb.error("clipboard unavailable");
+                    return;
+                }
+                cm.setPrimaryClip(ClipData.newPlainText("openzoo", text != null ? text : ""));
+                cb.success("copied");
+            } catch (Exception e) {
+                cb.error("clipboard write failed");
+            }
+        });
+    }
+
+    private void readClipboard(final CallbackContext cb) {
+        final Activity activity = cordova.getActivity();
+        activity.runOnUiThread(() -> {
+            try {
+                ClipboardManager cm = (ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
+                if (cm == null || !cm.hasPrimaryClip()) {
+                    cb.success("");
+                    return;
+                }
+                ClipData clip = cm.getPrimaryClip();
+                if (clip == null || clip.getItemCount() < 1) {
+                    cb.success("");
+                    return;
+                }
+                CharSequence text = clip.getItemAt(0).coerceToText(activity);
+                cb.success(text != null ? text.toString() : "");
+            } catch (Exception e) {
+                cb.error("clipboard read failed");
+            }
+        });
     }
 
     /**

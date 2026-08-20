@@ -89,14 +89,22 @@
   .wsub { color: #8e8e93; font-size: 12px; margin-bottom: 16px; }
   .wrow { border: 1px solid #1c1c1e; border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; }
   .wlab { color: #6f7080; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
-  .waddr { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
+  .waddr { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all;
+           -webkit-user-select: text; user-select: text; cursor: pointer; }
+  .copyable { -webkit-user-select: text; user-select: all; cursor: pointer; }
+  #toast { position: fixed; left: 50%; bottom: 88px; transform: translateX(-50%) translateY(10px);
+           background: #ececec; color: #111; padding: 8px 14px; border-radius: 999px;
+           font-size: 13px; font-weight: 600; opacity: 0; pointer-events: none;
+           transition: opacity .18s, transform .18s; z-index: 2000; }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   .wbal { border: 1px solid #1c1c1e; border-radius: 12px; padding: 10px 12px; margin-bottom: 10px;
           font-size: 12px; line-height: 1.7; }
   .wnote { color: #6f7080; font-size: 11px; line-height: 1.6; margin-top: 12px; }
   .ghost { background: none; border: 1px solid #2c2c2e; border-radius: 12px; padding: 8px 12px;
            color: #ececec; cursor: pointer; font: inherit; }
   #pasteBox textarea { width: 100%; min-height: 140px; background: #1c1c1e; border: 1px solid #2c2c2e;
-                       color: #ececec; border-radius: 12px; padding: 10px; font: inherit; }
+                       color: #ececec; border-radius: 12px; padding: 10px; font: inherit;
+                       -webkit-user-select: text; user-select: text; }
   #scrim { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 30; }
   @media (max-width: 760px) {
     #sidebar { position: fixed; left: 0; top: 0; bottom: 0; transform: translateX(-105%);
@@ -122,8 +130,8 @@
 
   <div id="walletOverlay" data-component="wallet-modal">
     <div id="walletBox">
-      <h3>Your wallet</h3>
-      <div class="wsub">This is <b>your</b> Seeker / Phantom wallet via Mobile Wallet Adapter. The app pays each call from it. Keys never leave the wallet app.</div>
+      <h3>Connected wallet</h3>
+      <div class="wsub">This is the Seeker / Phantom wallet you connected with Mobile Wallet Adapter — <b>your</b> wallet, not a local burner key. Each call is paid from it. Keys never leave the wallet app. Tap the address to copy.</div>
       <div id="walletBody">loading…</div>
       <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
         <button class="ghost" id="topUpBtn" type="button">Top up</button>
@@ -138,7 +146,8 @@
       <h3>Attach notes</h3>
       <div class="wsub">Paste text. The app keeps it with this thread — you just attach, then ask.</div>
       <textarea id="pasteText" placeholder="paste anything…"></textarea>
-      <div style="display:flex;gap:8px;margin-top:12px">
+      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+        <button class="ghost" id="pasteClip" type="button">Paste clipboard</button>
         <button class="ghost" id="pasteAttach" type="button">Attach</button>
         <button class="ghost" id="pasteClose" type="button">Cancel</button>
       </div>
@@ -182,9 +191,11 @@
     </div>
   </div>
 
+  <div id="toast" data-component="toast" role="status" aria-live="polite"></div>
   <script src="solana.js"></script>
   <script src="wrap.js"></script>
   <script src="pay.js"></script>
+  <script src="copy.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

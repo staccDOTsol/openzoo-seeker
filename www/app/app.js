@@ -66,8 +66,25 @@
   function setBanner(msg) {
     var el = $('banner');
     if (!msg) { el.classList.remove('show'); el.textContent = ''; return; }
-    el.textContent = window.OpenZooWrap ? OpenZooWrap.stripTwinHomework(msg) : msg;
+    var text = window.OpenZooPay ? OpenZooPay.humanizeError(msg) : msg;
+    if (window.OpenZooWrap) text = OpenZooWrap.stripTwinHomework(text);
+    el.textContent = text;
     el.classList.add('show');
+  }
+
+  function toast(msg) {
+    var el = $('toast');
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function () { el.classList.remove('show'); }, 1600);
+  }
+
+  function copyAddress(addr) {
+    if (!addr || !window.OpenZooCopy) return;
+    OpenZooCopy.copyText(addr).then(function () { toast('copied'); })
+      .catch(function () { toast('could not copy'); });
   }
 
   function signTransaction(txB64) {
@@ -137,6 +154,9 @@
       pendingSends.delete(data.id);
       if (data.error) s.reject(new Error(data.error));
       else s.resolve(data.signature);
+    }
+    if (data.type === 'app-resume' && window.OpenZooPay) {
+      OpenZooPay.notifyResume();
     }
   });
   parent.postMessage({ type: 'wallet-request-info' }, '*');
@@ -401,10 +421,10 @@
         d = await r.json();
       }
       if (!r.ok) {
-        var msg = (d.error && d.error.message) || d.error || d.message || ('HTTP ' + r.status);
+        var msg = OpenZooPay.humanizeError((d.error && d.error.message) || d.error || d.message || ('HTTP ' + r.status));
         t.messages.pop();
         t.messages.push({ role: 'assistant', content: 'the zoo hiccuped: ' + msg });
-        setBanner(String(msg));
+        setBanner(msg);
       } else {
         setBanner('');
         var ch = d.choices && d.choices[0];
@@ -421,9 +441,10 @@
       }
       saveStore();
     } catch (e) {
+      var fail = OpenZooPay.humanizeError(e);
       t.messages.pop();
-      t.messages.push({ role: 'assistant', content: 'the zoo hiccuped: ' + (e.message || e) });
-      setBanner(e.message || String(e));
+      t.messages.push({ role: 'assistant', content: 'the zoo hiccuped: ' + fail });
+      setBanner(fail);
     }
     state.busy = false;
     render();
@@ -445,8 +466,10 @@
       body.innerHTML = '';
       var addr = document.createElement('div');
       addr.className = 'wrow';
-      addr.innerHTML = '<div class="wlab">Solana</div><div class="waddr"></div>';
+      addr.innerHTML = '<div class="wlab">Solana · tap to copy</div><div class="waddr copyable" data-component="wallet-address"></div>';
       addr.querySelector('.waddr').textContent = wallet.address;
+      addr.querySelector('.waddr').title = 'Tap to copy';
+      addr.addEventListener('click', function () { copyAddress(wallet.address); });
       body.appendChild(addr);
       var bal = document.createElement('div');
       bal.className = 'wbal';
@@ -458,7 +481,7 @@
       }
       body.appendChild(bal);
     } catch (e) {
-      body.textContent = e.message || 'Could not read this wallet.';
+      body.textContent = OpenZooPay.humanizeError(e.message || e);
     }
   }
 
@@ -469,7 +492,7 @@
       setBanner(result.wrapped ? 'Top-up sent.' : 'This wallet is already ready to pay.');
       openWallet();
     } catch (e) {
-      setBanner(e.message || String(e));
+      setBanner(OpenZooPay.humanizeError(e));
     }
   }
 
@@ -510,6 +533,13 @@
   };
   $('fileInp').onchange = function () { addFiles($('fileInp').files); $('fileInp').value = ''; };
   $('folderInp').onchange = function () { addFiles($('folderInp').files); $('folderInp').value = ''; };
+  $('pasteClip').onclick = function () {
+    if (!window.OpenZooCopy) return;
+    OpenZooCopy.readText().then(function (text) {
+      if (!text) { toast('clipboard empty'); return; }
+      $('pasteText').value = ($('pasteText').value || '') + text;
+    }).catch(function () { toast('could not paste'); });
+  };
   $('pasteAttach').onclick = function () {
     var text = $('pasteText').value;
     if (text.trim()) pendingFiles.push({ name: 'notes.txt', size: text.length, content: text });
@@ -528,4 +558,8 @@
 
   render();
   loadModels();
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'hidden' && window.OpenZooPay) OpenZooPay.notifyResume();
+  });
 })();

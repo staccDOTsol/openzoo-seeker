@@ -83,7 +83,20 @@
       padding: 12px 14px; background: rgba(100,140,255,0.05);
       border-radius: 8px; border: 1px solid rgba(112,144,255,0.12);
       line-height: 1.5;
+      -webkit-user-select: text; user-select: all;
+      cursor: pointer;
     }
+    .addr-hint {
+      font-size: 10px; letter-spacing: 1px;
+      color: rgba(255,255,255,0.35); margin-top: 8px;
+    }
+    #toast {
+      position: fixed; left: 50%; bottom: 56px; transform: translateX(-50%) translateY(10px);
+      background: #ececec; color: #111; padding: 8px 14px; border-radius: 999px;
+      font-size: 13px; font-weight: 600; opacity: 0; pointer-events: none;
+      transition: opacity .18s, transform .18s; z-index: 10000;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
     .powered {
       position: fixed; bottom: 0; left: 0; right: 0;
       text-align: center; padding: 14px;
@@ -107,7 +120,8 @@
 
   <div id="connected" data-component="connected-panel">
     <div class="lbl" data-component="connected-label">CONNECTED</div>
-    <div class="addr" id="addr" data-component="wallet-address"></div>
+    <div class="addr" id="addr" data-component="wallet-address" title="Tap to copy"></div>
+    <div class="addr-hint">tap address to copy · select also works</div>
     <button class="btn primary" onclick="launchGame()" style="margin-top:22px;" data-testid="play-button">
       open zoo
     </button>
@@ -117,6 +131,7 @@
   </div>
 
   <div class="powered" data-component="footer">threads · chat · wallet</div>
+  <div id="toast" data-component="toast" role="status" aria-live="polite"></div>
 
   <!-- Cordova bridge — only exists when served from local www/ -->
   <script src="cordova.js"></script>
@@ -147,13 +162,78 @@
 
   function setStatus(msg) { $status.textContent = msg; }
 
+  function toast(msg) {
+    var el = document.getElementById('toast');
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function () { el.classList.remove('show'); }, 1600);
+  }
+
+  function copyViaDom(text) {
+    var ta = document.createElement('textarea');
+    ta.value = String(text == null ? '' : text);
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try { ta.setSelectionRange(0, ta.value.length); } catch (_) {}
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+  }
+
+  function nativeCopy(text) {
+    return new Promise(function (resolve, reject) {
+      if (window.MWA && typeof MWA.copyToClipboard === 'function') {
+        MWA.copyToClipboard(String(text), function () { resolve(true); }, function () { reject(new Error('copy failed')); });
+        return;
+      }
+      if (copyViaDom(text)) { resolve(true); return; }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(String(text)).then(function () { resolve(true); }, reject);
+        return;
+      }
+      reject(new Error('copy failed'));
+    });
+  }
+
+  function nativePaste() {
+    return new Promise(function (resolve, reject) {
+      if (window.MWA && typeof MWA.readClipboard === 'function') {
+        MWA.readClipboard(function (text) { resolve(text || ''); }, function () { reject(new Error('paste failed')); });
+        return;
+      }
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        navigator.clipboard.readText().then(resolve, reject);
+        return;
+      }
+      resolve('');
+    });
+  }
+
+  function copyAddress() {
+    if (!connectedAddress) return;
+    nativeCopy(connectedAddress).then(function () { toast('copied'); })
+      .catch(function () { setStatus('could not copy'); });
+  }
+
+  function postToGame(payload) {
+    var iframe = document.getElementById('game');
+    if (!iframe || !iframe.contentWindow) return;
+    try { iframe.contentWindow.postMessage(payload, GAME_ORIGIN); } catch (_) {}
+  }
+
   function showConnected(address, method) {
     connectedAddress = address;
     connectedMethod  = method;
 
     $picker.style.display = 'none';
     $connected.style.display = 'block';
-    $addr.textContent = address.slice(0, 4) + '...' + address.slice(-4);
+    $addr.textContent = address;
     setStatus('');
     log('Connected: ' + address.slice(0, 8) + '...' + address.slice(-4));
   }
@@ -283,6 +363,23 @@
       log('Re-sent wallet info to iframe');
     }
 
+    if (data.type === 'wallet-copy') {
+      nativeCopy(data.text || '').then(function () {
+        postToGame({ type: 'wallet-copy-response', id: data.id, ok: true });
+      }).catch(function () {
+        var ok = copyViaDom(data.text || '');
+        postToGame({ type: 'wallet-copy-response', id: data.id, ok: ok });
+      });
+    }
+
+    if (data.type === 'wallet-paste') {
+      nativePaste().then(function (text) {
+        postToGame({ type: 'wallet-paste-response', id: data.id, ok: true, text: text || '' });
+      }).catch(function () {
+        postToGame({ type: 'wallet-paste-response', id: data.id, ok: false, text: '' });
+      });
+    }
+
     // Sign a message with the connected MWA wallet (native approval dialog)
     if (data.type === 'wallet-sign-message') {
       log('Sign request (message) — id:' + data.id);
@@ -351,8 +448,20 @@
      ═══════════════════════════════════════════════ */
   log('Shell loaded');
 
+  $addr.addEventListener('click', copyAddress);
+
   document.addEventListener('deviceready', function() {
     log('deviceready');
+  }, false);
+
+  document.addEventListener('pause', function () {
+    log('pause (wallet app likely in front)');
+    postToGame({ type: 'app-pause' });
+  }, false);
+
+  document.addEventListener('resume', function () {
+    log('resume — retry pay/build if a 402 is in flight');
+    postToGame({ type: 'app-resume' });
   }, false);
   </script>
 </body>
