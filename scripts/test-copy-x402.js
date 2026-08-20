@@ -238,6 +238,35 @@ async function run() {
     assert.strictEqual(wrap.WTOKENX2, 'FXYkwMtfKpA174rp8ixVeiGs5TYGaBsYRrHE3KrR449B');
   });
 
+  await check('dark launch overlay stays up until chrome-ready', () => {
+    const shell = read('www/index.html');
+    const appJs = read('www/app/app.js');
+    const errPage = read('www/error.html');
+    const boot = shell.match(/<div id="oz-boot"[^>]*>[\s\S]*?<\/div>/);
+    assert.ok(boot, 'oz-boot markup');
+    assert.match(shell, /<body>\s*<div id="oz-boot"/);
+    assert.match(shell, /#oz-boot[\s\S]*z-index:\s*10000/);
+    assert.match(shell, /#oz-boot[\s\S]*background:\s*(#000|#0a0a18)/);
+    assert.match(boot[0], /starting/);
+    assert.doesNotMatch(boot[0], /<(img|svg)/i);
+    assert.match(shell, /DOMContentLoaded[\s\S]*hideBoot/);
+    assert.match(shell, /function launchGame\(\)[\s\S]*showBoot\(\)/);
+    assert.match(shell, /openzoo-chrome-ready/);
+    assert.match(shell, /setTimeout\(hideBoot,\s*50\)/);
+    assert.match(shell, /setTimeout\(hideBoot,\s*4000\)/);
+    assert.match(appJs, /parent\.postMessage\(\{\s*type:\s*'openzoo-chrome-ready'/);
+    const readyIdx = appJs.indexOf("type: 'openzoo-chrome-ready'");
+    const firstRender = appJs.lastIndexOf('render();', readyIdx);
+    const modelsIdx = appJs.indexOf('loadModels();', readyIdx);
+    assert.ok(firstRender !== -1 && firstRender < readyIdx, 'chrome-ready after first render()');
+    assert.ok(modelsIdx !== -1, 'loadModels still called');
+    assert.ok(readyIdx < modelsIdx, 'chrome-ready before loadModels — do not wait on fly.dev');
+    assert.match(errPage, /Reconnecting/);
+    assert.match(shell, /MWA\.authorize/);
+    assert.match(shell, /MWA\.signTransaction/);
+    assert.match(appJs, /OpenZooPay\.paidFetch/);
+  });
+
   await check('chat completions spill the prefix instead of dumping the thread', () => {
     const appJs = read('www/app/app.js');
     const spillJs = read('www/app/spill.js');

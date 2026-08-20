@@ -103,9 +103,31 @@
       font-size: 10px; letter-spacing: 2px;
       color: #fff;
     }
+
+    #oz-boot {
+      position: fixed; inset: 0; z-index: 10000;
+      background: #0a0a18;
+      display: flex; align-items: center; justify-content: center;
+      font-family: monospace; font-size: 13px; letter-spacing: 3px;
+      color: rgba(224,232,255,0.55);
+      pointer-events: all;
+    }
+    #oz-boot.is-off { display: none !important; }
+    #oz-boot .oz-dots span {
+      display: inline-block;
+      animation: oz-dots 1.2s infinite;
+      opacity: 0;
+    }
+    #oz-boot .oz-dots span:nth-child(2) { animation-delay: .2s; }
+    #oz-boot .oz-dots span:nth-child(3) { animation-delay: .4s; }
+    @keyframes oz-dots {
+      0%, 20% { opacity: 0; }
+      40%, 100% { opacity: 1; }
+    }
   </style>
 </head>
 <body>
+  <div id="oz-boot" role="status" aria-live="polite">starting<span class="oz-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></div>
   <img class="logo" src="icon-192.png" alt="OpenZoo" data-component="logo" width="120" height="120">
   <div class="title" data-component="title">OPENZOO</div>
   <div class="divider" data-component="divider"></div>
@@ -238,7 +260,30 @@
     log('Connected: ' + address.slice(0, 8) + '...' + address.slice(-4));
   }
 
+  var bootHideTimer = null;
+  var bootFallbackTimer = null;
+
+  function clearBootTimers() {
+    if (bootHideTimer) { clearTimeout(bootHideTimer); bootHideTimer = null; }
+    if (bootFallbackTimer) { clearTimeout(bootFallbackTimer); bootFallbackTimer = null; }
+  }
+
+  function hideBoot() {
+    clearBootTimers();
+    var el = document.getElementById('oz-boot');
+    if (el) el.classList.add('is-off');
+  }
+
+  function showBoot() {
+    clearBootTimers();
+    var el = document.getElementById('oz-boot');
+    if (el) el.classList.remove('is-off');
+    bootHideTimer = setTimeout(hideBoot, 4000);
+  }
+
   function launchGame() {
+    // Cover the empty iframe until chrome-ready. Do not dismiss here.
+    showBoot();
     $picker.style.display = 'none';
     $connected.style.display = 'none';
 
@@ -252,27 +297,29 @@
     iframe.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;border:none;z-index:9999;';
     document.body.appendChild(iframe);
 
-    if (connectedAddress) {
-      var sendWalletInfo = function() {
-        iframe.contentWindow.postMessage({
-          type: 'wallet-connected',
-          address: connectedAddress,
-          method: connectedMethod
-        }, GAME_ORIGIN);
-        log('Sent wallet-connected to iframe');
-      };
+    var sendWalletInfo = function() {
+      if (!connectedAddress) return;
+      iframe.contentWindow.postMessage({
+        type: 'wallet-connected',
+        address: connectedAddress,
+        method: connectedMethod
+      }, GAME_ORIGIN);
+      log('Sent wallet-connected to iframe');
+    };
 
-      iframe.addEventListener('load', function onLoad() {
-        iframe.removeEventListener('load', onLoad);
-        setTimeout(sendWalletInfo, 800);
-      });
-    }
+    iframe.addEventListener('load', function onLoad() {
+      iframe.removeEventListener('load', onLoad);
+      if (connectedAddress) setTimeout(sendWalletInfo, 800);
+      // Fallback if chrome-ready never arrives — not a hide-on-create.
+      bootFallbackTimer = setTimeout(hideBoot, 50);
+    });
 
     iframe.src = GAME_URL;
     log('Loading openzoo iframe...');
   }
 
   function closeIframe() {
+    hideBoot();
     var iframe = document.getElementById('game');
     if (iframe) iframe.remove();
     if (connectedAddress) {
@@ -295,6 +342,7 @@
 
     // Destroy iframe completely
     if (iframe) iframe.remove();
+    hideBoot();
 
     $picker.style.display = 'flex';
     $connected.style.display = 'none';
@@ -350,6 +398,11 @@
     if (data.type === 'wallet-exit') {
       log('App requested leave (keep wallet)');
       closeIframe();
+    }
+
+    if (data.type === 'openzoo-chrome-ready') {
+      log('App chrome ready');
+      hideBoot();
     }
 
     if (data.type === 'wallet-request-info' && connectedAddress) {
@@ -449,6 +502,11 @@
   log('Shell loaded');
 
   $addr.addEventListener('click', copyAddress);
+
+  document.addEventListener('DOMContentLoaded', function () {
+    // First-run CONNECT must be visible. Post-authorize skip re-shows in launchGame.
+    hideBoot();
+  }, false);
 
   document.addEventListener('deviceready', function() {
     log('deviceready');

@@ -999,6 +999,7 @@
   }
 
   render();
+  try { parent.postMessage({ type: 'openzoo-chrome-ready' }, '*'); } catch (_) {}
   loadModels();
 
   document.addEventListener('visibilitychange', function () {
