@@ -1,73 +1,27 @@
-/* OpenZoo Seeker — x402 payment + Solana rail picker.
-   No Solana libraries. The gateway builds the unsigned tx; the shell signs it.
-   NEVER call MWA.signAndSendTransaction from this path.
-
-   Screen labels match chat.openzoo.fun: USDC / TOKEN / LEOS only.
-   Never print yUSDCx / wTOKENx / wLEOSx. Those are settlement plumbing.
-
-   /v1/pay/build was verified 2026-08-20 as transfer-only (ComputeBudget +
-   Token-2022 TransferChecked). No wrap program, no underlying mint in the
-   account list. loader.js claims wrap+transfer; do not assume it. If that
-   changes, flip BUILD_WRAPS after another real POST decode.
-*/
+/* OpenZoo Seeker — live 402 rails + ez-mode wrap + partial-sign pay.
+   402 pay: MWA.signTransaction only (never broadcast).
+   Wrap / top-up: MWA.signAndSendTransaction is allowed. */
 (function (root) {
   'use strict';
 
+  var wrap = (typeof module !== 'undefined' && module.exports)
+    ? require('./wrap.js')
+    : root.OpenZooWrap;
+
   var GATEWAY = 'https://x402-tokens.fly.dev';
   var AUTH = 'Bearer openzoo-seeker';
-
-  // Verified live 2026-08-20: pay/build does NOT assemble wrap+transfer.
-  var BUILD_WRAPS = false;
-
-  var MINTS = {
-    YUSDCX: '6ZjjxcoicqM4nniddkuPVwew4PDwY3swbfHsGbCuLuTv',
-    WTOKENX: 'Bo7xBF7SY8EyUBPUxRP66SFafxoPf2n5uqiLjbxEebx9',
-    WTOKENX_LIVE: 'FXYkwMtfKpA174rp8ixVeiGs5TYGaBsYRrHE3KrR449B',
-    WLEOSX: '3FViQRMqtG6dUDFxZyyVvpM9xTHsKdX7uqZ5jvL8NZ35',
-    USDC: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-    TOKEN: 'EVULoNF4DeMBN4dGiZiDfpiiTfNZgoCvXWWgaV3epump',
-    LEOS: '5xgsnby6P9zqGK71J7H4yJLxzqPvNbC7rDZxNzjHmj7e'
-  };
-
-  // Twin symbol / mint → the ONLY names allowed on screen.
-  var DISPLAY = {
-    yUSDCx: 'USDC', wTOKENx: 'TOKEN', wLEOSx: 'LEOS',
-    USDC: 'USDC', TOKEN: 'TOKEN', LEOS: 'LEOS'
-  };
-
-  var RAILS = {
-    USDC: {
-      label: 'USDC',
-      underlying: MINTS.USDC,
-      twins: [MINTS.YUSDCX],
-      symbols: ['yUSDCx', 'USDC']
-    },
-    TOKEN: {
-      label: 'TOKEN',
-      underlying: MINTS.TOKEN,
-      twins: [MINTS.WTOKENX, MINTS.WTOKENX_LIVE],
-      symbols: ['wTOKENx', 'TOKEN']
-    },
-    LEOS: {
-      label: 'LEOS',
-      underlying: MINTS.LEOS,
-      twins: [MINTS.WLEOSX],
-      symbols: ['wLEOSx', 'LEOS']
-    }
-  };
-
-  var TWIN_TO_LABEL = {};
-  Object.keys(RAILS).forEach(function (label) {
-    RAILS[label].twins.forEach(function (mint) { TWIN_TO_LABEL[mint] = label; });
-  });
-
   var TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
   var TOKEN_2022_PROGRAM = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
-
   var RPCS = [
     'https://api.mainnet-beta.solana.com',
     'https://solana-rpc.publicnode.com'
   ];
+
+  var HOLDING_MINTS = {
+    USDC: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    TOKEN: 'EVULoNF4DeMBN4dGiZiDfpiiTfNZgoCvXWWgaV3epump',
+    LEOS: '5xgsnby6P9zqGK71J7H4yJLxzqPvNbC7rDZxNzjHmj7e'
+  };
 
   function toBig(v) {
     if (typeof v === 'bigint') return v;
@@ -75,124 +29,23 @@
     try { return BigInt(String(v)); } catch (_) { return 0n; }
   }
 
-  function isSolanaNetwork(network) {
-    return typeof network === 'string' && network.indexOf('solana:') === 0;
-  }
-
   function solanaAccepts(accepts) {
     var out = [];
-    var list = accepts || [];
-    for (var i = 0; i < list.length; i++) {
-      if (isSolanaNetwork(list[i].network)) out.push(list[i]);
-    }
+    (accepts || []).forEach(function (row) {
+      if (!wrap.isSolanaNetwork(row && row.network)) return;
+      if (wrap.isDrainedMint(row.asset)) return;
+      out.push(row);
+    });
     return out;
   }
 
   function displaySymbol(row) {
     var raw = row && row.extra && row.extra.symbol;
-    if (raw && DISPLAY[raw]) return DISPLAY[raw];
-    if (row && row.asset && TWIN_TO_LABEL[row.asset]) return TWIN_TO_LABEL[row.asset];
-    if (raw && (raw === 'yUSDCx' || raw === 'wTOKENx' || raw === 'wLEOSx')) {
-      return DISPLAY[raw];
-    }
-    return 'token';
+    return wrap.userLabelFor(raw, row && row.asset);
   }
 
-  function fundMessage(solRows) {
-    var labels = ['USDC', 'TOKEN'];
-    (solRows || []).forEach(function (row) {
-      if (displaySymbol(row) === 'LEOS' && labels.indexOf('LEOS') < 0) labels.push('LEOS');
-    });
-    return 'Fund this wallet with ' + labels.join(' / ');
-  }
-
-  function findAcceptForRail(accepts, rail) {
-    var want = String(rail || '').toUpperCase();
-    var spec = RAILS[want];
-    var sol = solanaAccepts(accepts);
-    for (var i = 0; i < sol.length; i++) {
-      var row = sol[i];
-      if (displaySymbol(row) === want) return row;
-      if (spec && spec.twins.indexOf(row.asset) >= 0) return row;
-      var raw = row.extra && row.extra.symbol;
-      if (spec && raw && spec.symbols.indexOf(raw) >= 0) return row;
-    }
-    return null;
-  }
-
-  function canCoverMint(mint, need, balances) {
-    return toBig(balances && balances[mint]) >= need && need > 0n;
-  }
-
-  function assessCoverage(row, balances, solRows) {
-    var need = toBig(row.maxAmountRequired);
-    if (canCoverMint(row.asset, need, balances)) {
-      return { ok: true, accept: row };
-    }
-
-    var label = displaySymbol(row);
-    var spec = RAILS[label];
-    var unwrapped = spec && toBig(balances && balances[spec.underlying]) > 0n;
-    var reason = fundMessage(solRows);
-
-    if (unwrapped && !BUILD_WRAPS) {
-      return {
-        ok: false,
-        code: 'unwrapped-only',
-        reason: reason,
-        details: { rail: label, wrap: false }
-      };
-    }
-
-    return {
-      ok: false,
-      code: 'no-balance',
-      reason: reason,
-      details: { rail: label, wrap: BUILD_WRAPS }
-    };
-  }
-
-  /**
-   * Map the user's USDC / TOKEN / LEOS button onto one Solana accept row.
-   * Never defaults to accepts[0]. Never returns an eip155 row.
-   * preferredRail is required — that is the button.
-   */
-  function pickPayableRail(accepts, balances, preferredRail) {
-    if (!balances || typeof balances !== 'object') {
-      return {
-        ok: false,
-        code: 'no-balances',
-        reason: 'Token balances were not read. The app will not guess a rail.'
-      };
-    }
-
-    var sol = solanaAccepts(accepts);
-    if (!sol.length) {
-      return {
-        ok: false,
-        code: 'no-solana',
-        reason: 'This 402 has no Solana rail. Seeker only pays Solana rows.'
-      };
-    }
-
-    if (!preferredRail) {
-      return {
-        ok: false,
-        code: 'need-rail',
-        reason: 'pick USDC, TOKEN, or LEOS'
-      };
-    }
-
-    var accept = findAcceptForRail(sol, preferredRail);
-    if (!accept) {
-      return {
-        ok: false,
-        code: 'not-offered',
-        reason: String(preferredRail).toUpperCase() + ' is not offered for this payment'
-      };
-    }
-
-    return assessCoverage(accept, balances, sol);
+  function fundMessage() {
+    return 'Add USDC, TOKEN, or LEOS to this wallet to pay.';
   }
 
   function mergeMintMaps() {
@@ -200,6 +53,7 @@
     for (var a = 0; a < arguments.length; a++) {
       var map = arguments[a] || {};
       Object.keys(map).forEach(function (mint) {
+        if (wrap.isDrainedMint(mint)) return;
         out[mint] = (toBig(out[mint]) + toBig(map[mint])).toString();
       });
     }
@@ -219,6 +73,7 @@
       var info = value[i] && value[i].account && value[i].account.data &&
         value[i].account.data.parsed && value[i].account.data.parsed.info;
       if (!info || !info.mint || !info.tokenAmount) continue;
+      if (wrap.isDrainedMint(info.mint)) continue;
       var amount = info.tokenAmount.amount;
       if (amount == null) continue;
       out[info.mint] = (toBig(out[info.mint]) + toBig(amount)).toString();
@@ -242,12 +97,10 @@
       headers: { 'content-type': 'application/json' },
       body: body
     }).then(function (r) {
-      if (!r.ok) throw new Error(rpcUrl + ' HTTP ' + r.status);
+      if (!r.ok) throw new Error('balance read failed');
       return r.json();
     }).then(function (data) {
-      if (!Array.isArray(data) || data.length < 2) {
-        throw new Error('unexpected rpc batch shape');
-      }
+      if (!Array.isArray(data) || data.length < 2) throw new Error('balance read failed');
       return mergeMintMaps(parseTokenAccounts(data[0]), parseTokenAccounts(data[1]));
     });
   }
@@ -256,19 +109,119 @@
     var errors = [];
     function next(i) {
       if (i >= RPCS.length) {
-        var err = new Error(
-          'Could not read token balances from a public Solana RPC. ' +
-          'The app will not guess a rail.\n' + errors.join('\n')
-        );
+        var err = new Error('Could not read this wallet. Try again on the phone network.');
         err.code = 'balance-read-failed';
         throw err;
       }
       return fetchBalancesFrom(RPCS[i], owner).catch(function (e) {
-        errors.push(RPCS[i] + ': ' + (e && e.message ? e.message : e));
+        errors.push(e && e.message ? e.message : e);
         return next(i + 1);
       });
     }
     return next(0);
+  }
+
+  function rpcCall(method, params) {
+    var body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: method, params: params });
+    function next(i) {
+      if (i >= RPCS.length) throw new Error('Could not reach Solana.');
+      return fetch(RPCS[i], {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: body
+      }).then(function (r) {
+        if (!r.ok) throw new Error('rpc http');
+        return r.json();
+      }).then(function (j) {
+        if (j.error) throw new Error('rpc');
+        return j.result;
+      }).catch(function () { return next(i + 1); });
+    }
+    return next(0);
+  }
+
+  function poolState(pool) {
+    return Promise.all([
+      rpcCall('getTokenAccountBalance', [pool.escrow]).then(function (r) {
+        return toBig(r && r.value && r.value.amount);
+      }).catch(function () { return 0n; }),
+      rpcCall('getTokenSupply', [pool.wrapped]).then(function (r) {
+        return toBig(r && r.value && r.value.amount);
+      }).catch(function () { return 0n; })
+    ]).then(function (pair) {
+      return { reserves: pair[0], supply: pair[1] };
+    });
+  }
+
+  function latestBlockhash() {
+    return rpcCall('getLatestBlockhash', [{ commitment: 'confirmed' }]).then(function (r) {
+      return r && r.value && r.value.blockhash;
+    });
+  }
+
+  function holdingScore(row, balances, kinds) {
+    var haveTwin = toBig(balances && balances[row.asset]);
+    var pool = wrap.resolvePool(kinds, row.asset);
+    var haveUnder = pool ? toBig(balances && balances[pool.underlying]) : 0n;
+    var label = displaySymbol(row);
+    var prefer = 0;
+    if (label === 'TOKEN' && toBig(balances && balances[HOLDING_MINTS.TOKEN]) > 0n) prefer = 3;
+    else if (label === 'USDC' && toBig(balances && balances[HOLDING_MINTS.USDC]) > 0n) prefer = 2;
+    else if (label === 'LEOS' && toBig(balances && balances[HOLDING_MINTS.LEOS]) > 0n) prefer = 1;
+    if (haveTwin > 0n) prefer += 4;
+    return { haveTwin: haveTwin, haveUnder: haveUnder, prefer: prefer, pool: pool };
+  }
+
+  /**
+   * Ez-mode: pick the Solana row this wallet can actually cover, wrapping
+   * TOKEN / USDC / LEOS (or the live twin) behind the scenes.
+   */
+  function pickPayablePlan(accepts, balances, kinds) {
+    if (!balances || typeof balances !== 'object') {
+      return { ok: false, code: 'no-balances', reason: 'Could not read this wallet.' };
+    }
+    var sol = solanaAccepts(accepts);
+    if (!sol.length) {
+      return { ok: false, code: 'no-solana', reason: 'This call has no Solana payment option.' };
+    }
+
+    var ranked = sol.map(function (row) {
+      var score = holdingScore(row, balances, kinds);
+      return { row: row, score: score };
+    }).sort(function (a, b) { return b.score.prefer - a.score.prefer; });
+
+    for (var i = 0; i < ranked.length; i++) {
+      var row = ranked[i].row;
+      var need = toBig(row.maxAmountRequired);
+      var have = toBig(balances[row.asset]);
+      if (need > 0n && have >= need) {
+        return { ok: true, accept: row, wrap: null, label: displaySymbol(row) };
+      }
+    }
+
+    for (var j = 0; j < ranked.length; j++) {
+      var plan = ranked[j];
+      var accept = plan.row;
+      var pool = plan.score.pool;
+      if (!pool) continue;
+      var short = toBig(accept.maxAmountRequired) - plan.score.haveTwin;
+      if (short <= 0n) {
+        return { ok: true, accept: accept, wrap: null, label: displaySymbol(accept) };
+      }
+      if (plan.score.haveUnder <= 0n) continue;
+      return {
+        ok: true,
+        accept: accept,
+        wrap: {
+          pool: pool,
+          sharesNeeded: short.toString(),
+          from: wrap.userLabelFor(pool.underlyingSymbol, pool.underlying)
+        },
+        label: displaySymbol(accept)
+      };
+    }
+
+    return { ok: false, code: 'no-balance', reason: fundMessage() };
   }
 
   function encodePayment(envelope, signedTxB64) {
@@ -276,15 +229,15 @@
       x402Version: envelope.x402Version,
       scheme: envelope.scheme,
       network: envelope.network,
-      payload: {
-        transaction: signedTxB64
-      }
+      payload: { transaction: signedTxB64 }
     };
-    return btoa(JSON.stringify(copy));
+    var json = JSON.stringify(copy);
+    if (typeof btoa === 'function') return btoa(json);
+    return Buffer.from(json, 'utf8').toString('base64');
   }
 
   function PayError(message, extra) {
-    var e = new Error(message);
+    var e = new Error(wrap.stripTwinHomework(message));
     e.name = 'PayError';
     if (extra) {
       e.code = extra.code;
@@ -293,53 +246,143 @@
     return e;
   }
 
+  function visibleHoldings(balances, kinds) {
+    var rows = [];
+    var seen = {};
+    function add(label, mint) {
+      if (!mint || wrap.isDrainedMint(mint) || seen[mint]) return;
+      var raw = toBig(balances && balances[mint]);
+      if (raw <= 0n) return;
+      seen[mint] = true;
+      rows.push({ label: label, mint: mint, raw: raw.toString() });
+    }
+    add('USDC', HOLDING_MINTS.USDC);
+    add('TOKEN', HOLDING_MINTS.TOKEN);
+    add('LEOS', HOLDING_MINTS.LEOS);
+    solanaKindsSafe(kinds).forEach(function (k) {
+      var extra = k.extra || {};
+      add(wrap.userLabelFor(extra.symbol, extra.asset), extra.asset);
+    });
+    return rows;
+  }
+
+  function solanaKindsSafe(kinds) {
+    try { return wrap.solanaKinds(kinds); } catch (_) { return []; }
+  }
+
+  async function topUpIfNeeded(plan, ctx) {
+    if (!plan.wrap) return;
+    var pool = plan.wrap.pool;
+    if (ctx.onStatus) ctx.onStatus('topping up…');
+    var state = await poolState(pool);
+    var deposit = wrap.depositForShares(plan.wrap.sharesNeeded, state.reserves, state.supply);
+    var haveUnder = toBig(ctx.balances && ctx.balances[pool.underlying]);
+    if (haveUnder < deposit) {
+      throw PayError(fundMessage(), { code: 'underfunded' });
+    }
+    var blockhash = await latestBlockhash();
+    if (!blockhash) throw PayError('Could not prepare a top-up.');
+    var built = wrap.compileWrapTransaction(pool, ctx.payer, deposit, blockhash, ctx.payer);
+    if (!ctx.signAndSendTransaction) {
+      throw PayError('This wallet cannot top up from here.');
+    }
+    if (ctx.onStatus) ctx.onStatus('approve the top-up in your wallet…');
+    var sig = await ctx.signAndSendTransaction(built.transaction);
+    if (!sig) throw PayError('Top-up was not approved.');
+    await confirmSignature(sig);
+    return sig;
+  }
+
+  function confirmSignature(signature) {
+    var deadline = Date.now() + 90000;
+    function once() {
+      return rpcCall('getSignatureStatuses', [[signature]]).then(function (res) {
+        var st = res && res.value && res.value[0];
+        if (st && st.err) throw PayError('Top-up failed on-chain.');
+        if (st && (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized')) {
+          return signature;
+        }
+        if (Date.now() >= deadline) throw PayError('Top-up is taking too long. Try the call again.');
+        return new Promise(function (resolve) { setTimeout(resolve, 1500); }).then(once);
+      });
+    }
+    return once();
+  }
+
+  async function topUpFromHoldings(payer, signAndSendTransaction, onStatus) {
+    var kinds = await wrap.fetchSupported();
+    var balances = await fetchBalances(payer);
+    var fake = wrap.solanaKinds(kinds).map(function (k) {
+      return {
+        scheme: 'exact',
+        network: k.network,
+        asset: k.extra.asset,
+        maxAmountRequired: '1',
+        extra: { symbol: k.extra.symbol, decimals: k.extra.decimals }
+      };
+    });
+    var plan = pickPayablePlan(fake, balances, kinds);
+    if (!plan.ok) throw PayError(plan.reason, plan);
+    if (!plan.wrap) return { wrapped: false, reason: 'ready' };
+    return topUpIfNeeded(plan, {
+      payer: payer,
+      balances: balances,
+      signAndSendTransaction: signAndSendTransaction,
+      onStatus: onStatus
+    }).then(function (sig) {
+      return { wrapped: true, signature: sig };
+    });
+  }
+
   /**
-   * fetch url; on 402 map the user's rail button → pay/build → parent-sign → X-PAYMENT.
-   * ctx: { payer, signTransaction, preferredRail, onStatus, fetchBalances? }
+   * fetch url; on 402: live directory → holdings → wrap if needed → pay/build
+   * → partial-sign → X-PAYMENT. Never broadcasts the payment tx.
    */
   function paidFetch(url, options, ctx) {
     ctx = ctx || {};
-    var headers = Object.assign({
-      authorization: AUTH
-    }, options && options.headers ? options.headers : {});
+    var headers = Object.assign({ authorization: AUTH }, options && options.headers ? options.headers : {});
 
-    function once() {
-      return fetch(url, Object.assign({}, options, { headers: headers }));
+    function once(extraHeaders) {
+      return fetch(url, Object.assign({}, options, {
+        headers: Object.assign({}, headers, extraHeaders || {})
+      }));
     }
 
     return once().then(function (res) {
       if (res.status !== 402) return res;
       if (!ctx.payer) {
-        throw PayError('Connect a wallet first — this call needs a Solana x402 payment.');
+        throw PayError('Connect a wallet first — this call is paid from your wallet.');
       }
       return res.json().then(function (challenge) {
         var read = ctx.fetchBalances || fetchBalances;
-        if (ctx.onStatus) ctx.onStatus('reading wallet balances…');
-        return Promise.resolve(read(ctx.payer)).then(function (balances) {
-          var pick = pickPayableRail(challenge.accepts, balances, ctx.preferredRail);
-          if (!pick.ok) throw PayError(pick.reason, pick);
-          if (ctx.onStatus) {
-            ctx.onStatus('building ' + displaySymbol(pick.accept) + ' payment…');
-          }
-          return fetch(GATEWAY + '/v1/pay/build', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ accept: pick.accept, payer: ctx.payer })
-          }).then(function (builtRes) {
-            return builtRes.json().then(function (built) {
-              if (!builtRes.ok || !built.transaction) {
-                throw PayError(
-                  (built && (built.error || built.detail)) || 'pay/build failed'
-                );
-              }
-              if (ctx.onStatus) ctx.onStatus('approve the payment in your wallet…');
-              return Promise.resolve(ctx.signTransaction(built.transaction)).then(function (signed) {
-                if (!signed) throw PayError('wallet returned an empty signature');
-                var retryHeaders = Object.assign({}, headers, {
-                  'X-PAYMENT': encodePayment(built.envelope, signed)
+        var dir = ctx.fetchSupported || wrap.fetchSupported;
+        if (ctx.onStatus) ctx.onStatus('checking this wallet…');
+        return Promise.all([
+          Promise.resolve(read(ctx.payer)),
+          Promise.resolve(dir())
+        ]).then(function (pair) {
+          var balances = pair[0];
+          var kinds = pair[1];
+          var plan = pickPayablePlan(challenge.accepts, balances, kinds);
+          if (!plan.ok) throw PayError(plan.reason, plan);
+          ctx.balances = balances;
+          return Promise.resolve(topUpIfNeeded(plan, ctx)).then(function () {
+            if (ctx.onStatus) ctx.onStatus('building payment…');
+            return fetch(GATEWAY + '/v1/pay/build', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ accept: plan.accept, payer: ctx.payer })
+            }).then(function (builtRes) {
+              return builtRes.json().then(function (built) {
+                if (!builtRes.ok || !built.transaction) {
+                  throw PayError((built && (built.error || built.detail)) || 'payment build failed');
+                }
+                if (ctx.onStatus) ctx.onStatus('approve the payment in your wallet…');
+                return Promise.resolve(ctx.signTransaction(built.transaction)).then(function (signed) {
+                  if (!signed) throw PayError('wallet returned an empty signature');
+                  if (ctx.onStatus) ctx.onStatus('settling…');
+                  return once({ 'X-PAYMENT': encodePayment(built.envelope, signed) });
                 });
-                if (ctx.onStatus) ctx.onStatus('settling…');
-                return fetch(url, Object.assign({}, options, { headers: retryHeaders }));
               });
             });
           });
@@ -351,25 +394,21 @@
   var api = {
     GATEWAY: GATEWAY,
     AUTH: AUTH,
-    BUILD_WRAPS: BUILD_WRAPS,
-    MINTS: MINTS,
-    RAILS: RAILS,
-    DISPLAY: DISPLAY,
     RPCS: RPCS,
+    HOLDING_MINTS: HOLDING_MINTS,
     toBig: toBig,
-    isSolanaNetwork: isSolanaNetwork,
     solanaAccepts: solanaAccepts,
     displaySymbol: displaySymbol,
-    findAcceptForRail: findAcceptForRail,
-    pickPayableRail: pickPayableRail,
+    fundMessage: fundMessage,
     fetchBalances: fetchBalances,
+    pickPayablePlan: pickPayablePlan,
     encodePayment: encodePayment,
-    paidFetch: paidFetch
+    paidFetch: paidFetch,
+    visibleHoldings: visibleHoldings,
+    poolState: poolState,
+    topUpFromHoldings: topUpFromHoldings
   };
 
-  if (typeof module !== 'undefined' && module.exports) {
-    module.exports = api;
-  } else {
-    root.OpenZooPay = api;
-  }
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else root.OpenZooPay = api;
 })(typeof window !== 'undefined' ? window : globalThis);
