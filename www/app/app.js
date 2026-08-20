@@ -16,6 +16,8 @@
   var pendingFiles = [];
   var kindsCache = null;
   var modelIds = [];
+  var Auto = window.OpenZooAuto || {};
+  var AUTO_MODEL = Auto.AUTO_MODEL || 'openzoo/auto';
 
   function $(id) { return document.getElementById(id); }
 
@@ -317,6 +319,8 @@
 
   function animal(id) {
     if (!id) return '🐾';
+    if (Auto.isAuto && Auto.isAuto(id)) return '🦓';
+    if (id.indexOf('openzoo') === 0) return '🦓';
     if (id.indexOf('anthropic') === 0) return '🦒';
     if (id.indexOf('openai') === 0) return '🦉';
     if (id.indexOf('deepseek') === 0) return '🐋';
@@ -328,8 +332,32 @@
     return '🐾';
   }
 
+  function selectedModel() {
+    var picker = $('model') && $('model').value;
+    return Auto.resolveSendModel
+      ? Auto.resolveSendModel(picker, saved && saved.model)
+      : (picker || (saved && saved.model) || AUTO_MODEL);
+  }
+
+  function paintModelOptions(sel, models, want) {
+    sel.innerHTML = '';
+    models.forEach(function (m) {
+      var o = document.createElement('option');
+      o.value = m.id;
+      o.textContent = Auto.formatPickerLabel
+        ? Auto.formatPickerLabel(m.id, animal)
+        : (animal(m.id) + ' ' + (Auto.isAuto && Auto.isAuto(m.id) ? 'Auto' : m.id.replace(/^[^/]+\//, '')));
+      sel.appendChild(o);
+    });
+    if (want && [].some.call(sel.options, function (o) { return o.value === want; })) sel.value = want;
+    else sel.value = AUTO_MODEL;
+  }
+
   async function loadModels() {
     var sel = $('model');
+    var want = Auto.resolveSendModel
+      ? Auto.resolveSendModel(saved && saved.model, '')
+      : ((saved && saved.model) || AUTO_MODEL);
     try {
       var r = await fetch(GATEWAY + '/v1/models');
       var d = await r.json();
@@ -337,19 +365,13 @@
         return m.id && m.id.indexOf('~') !== 0 && m.id.indexOf(':batch') < 0;
       });
       models.sort(function (a, b) { return a.id.localeCompare(b.id); });
-      modelIds = models.map(function (m) { return m.id; });
-      sel.innerHTML = '';
-      models.forEach(function (m) {
-        var o = document.createElement('option');
-        o.value = m.id;
-        o.textContent = animal(m.id) + ' ' + m.id.replace(/^[^/]+\//, '');
-        sel.appendChild(o);
+      models = Auto.mergeCatalog ? Auto.mergeCatalog(models) : [{ id: AUTO_MODEL }].concat(models);
+      modelIds = models.map(function (m) { return m.id; }).filter(function (id) {
+        return !Auto.isAuto || !Auto.isAuto(id);
       });
-      var want = (saved && saved.model) || 'google/gemini-3.7-flash';
-      if ([].some.call(sel.options, function (o) { return o.value === want; })) sel.value = want;
-      else if (models[0]) sel.value = models[0].id;
+      paintModelOptions(sel, models, want);
     } catch (_) {
-      sel.innerHTML = '<option value="google/gemini-3.7-flash">gemini flash</option>';
+      paintModelOptions(sel, Auto.mergeCatalog ? Auto.mergeCatalog([]) : [{ id: AUTO_MODEL }], want);
     }
   }
 
@@ -410,18 +432,27 @@
     if (!tierSel || !raceSel) return;
     tierSel.value = spend.tier;
     raceSel.value = OpenZooRace.raceSelectValue(spend.race, spend.raceNeed);
-    var racing = spend.race >= 2;
+    var pinned = Auto.isPinned
+      ? Auto.isPinned(modelSel && modelSel.value)
+      : !!(modelSel && modelSel.value && modelSel.value !== AUTO_MODEL);
+    var racing = Auto.shouldRace
+      ? Auto.shouldRace(spend.race, modelSel && modelSel.value)
+      : (spend.race >= 2 && pinned);
     if (modelSel) {
       modelSel.disabled = racing;
       modelSel.className = 'dial' + (racing ? ' pinned' : '');
       modelSel.title = racing
         ? 'Racing the ' + spend.tier + ' band — pick 1 model to pin a single model.'
-        : 'Model';
+        : (Auto.isAuto && Auto.isAuto(modelSel.value)
+          ? 'Auto — sidecar picks the cheapest model that can finish this turn. Pin a real model to keep it.'
+          : 'Pinned model for this chat. Choose Auto to let the sidecar pick.');
     }
     tierSel.className = 'dial' + (spend.tier === 'expensive' || spend.tier === 'grok4.6' ? ' hot' : '');
     raceSel.className = 'dial' + (racing ? ' hot' : '');
     tierSel.title = 'How much to spend per turn when racing';
-    raceSel.title = 'Ask N models from the tier at once. First X countable back are judged. You pay for every entrant.';
+    raceSel.title = pinned
+      ? 'Ask N models from the tier at once. First X countable back are judged. You pay for every entrant.'
+      : 'Race needs a pinned model. Auto is one sidecar-picked model per turn.';
   }
 
   function renderHud() {
@@ -623,6 +654,7 @@
     var buf = '';
     var content = '';
     var last = {};
+    var routed = '';
     while (true) {
       var chunk = await reader.read();
       if (chunk.done) break;
@@ -637,6 +669,11 @@
         try {
           var ev = JSON.parse(payload);
           last = ev;
+          if (!routed) {
+            routed = Auto.routedModelId
+              ? Auto.routedModelId(ev)
+              : (ev.model && typeof ev.model === 'string' ? ev.model : '');
+          }
           var delta = ev.choices && ev.choices[0] && ev.choices[0].delta;
           var piece = delta && delta.content;
           if (piece) {
@@ -650,7 +687,8 @@
     if (!last.choices[0]) last.choices[0] = {};
     if (!last.choices[0].message) last.choices[0].message = { content: content };
     if (!last.choices[0].message.content) last.choices[0].message.content = content;
-    return { r: res, d: last, streamed: true, streamedContent: content };
+    if (routed && !last.model) last.model = routed;
+    return { r: res, d: last, streamed: true, streamedContent: content, routed: routed };
   }
 
   async function readCompletion(res, onDelta) {
@@ -660,7 +698,8 @@
       return readSSE(res, onDelta);
     }
     var d = await res.json();
-    return { r: res, d: d, streamed: false };
+    var routed = Auto.routedModelId ? Auto.routedModelId(d) : '';
+    return { r: res, d: d, streamed: false, routed: routed };
   }
 
   async function postChat(thread, history, retried, opts) {
@@ -676,8 +715,10 @@
     }
     var headers = OpenZooSpill.chatHeaders(planned.contextId);
     OpenZooSpill.assertNoFullDump(headers, planned.messages, history.length);
-    var model = opts.model || $('model').value;
-    var maxTok = opts.maxTokens || (/deepseek|grok|thinking|fable|sonnet-5|-r1|reason/i.test(model) ? 16384 : 4096);
+    var model = opts.model || selectedModel();
+    var needsHeadroom = (Auto.isAuto && Auto.isAuto(model)) ||
+      /deepseek|grok|thinking|fable|sonnet-5|-r1|reason/i.test(model);
+    var maxTok = opts.maxTokens || (needsHeadroom ? 16384 : 4096);
     var body = {
       model: model,
       messages: planned.messages,
@@ -698,7 +739,16 @@
       if (fresh.corpus) await spillPrefix(thread, fresh.corpus);
       return postChat(thread, history, true, opts);
     }
-    return { r: r, d: d, planned: planned, streamed: read.streamed, streamedContent: read.streamedContent };
+    var routed = read.routed || (Auto.routedModelId ? Auto.routedModelId(d, model) : '');
+    return {
+      r: r,
+      d: d,
+      planned: planned,
+      streamed: read.streamed,
+      streamedContent: read.streamedContent,
+      model: model,
+      routed: routed
+    };
   }
 
   async function postJudge(model, messages, maxTok) {
@@ -775,7 +825,9 @@
       if (corpus) await attachQuietly(t, corpus);
       var history = completedHistory(t);
       var spend = spendOf(t);
-      var racing = window.OpenZooRace && spend.race >= 2;
+      var racing = window.OpenZooRace && (Auto.shouldRace
+        ? Auto.shouldRace(spend.race, selectedModel())
+        : (spend.race >= 2 && selectedModel() !== AUTO_MODEL));
       var content = '';
       var lastX402 = {};
       if (racing) {
@@ -821,6 +873,8 @@
         content = (ch && ch.message && ch.message.content) || posted.streamedContent || '';
         lastX402 = d.x402 || {};
         noteThreadReceipt(t, lastX402);
+        var routed = posted.routed || (Auto.routedModelId ? Auto.routedModelId(d, posted.model) : '');
+        if (routed) lastX402 = Object.assign({}, lastX402, { routed: routed });
       }
       setBanner('');
       if (!content) content = racing ? OpenZooRace.RACE_EVERY_FAILED : 'the zoo returned an empty reply.';
@@ -831,6 +885,10 @@
         if (mult) bits.push(OpenZooSpill.formatSavingX(mult));
         else if (!lastX402.billedUsd && t.spent) bits.push('$' + Number(t.spent).toFixed(4));
       }
+      var shown = Auto.compactModelId
+        ? Auto.compactModelId(lastX402.routed)
+        : (lastX402.routed || '');
+      if (shown && !(Auto.isAuto && Auto.isAuto(shown))) bits.push(shown);
       if (racing) bits.push('race ' + spend.raceNeed + '/' + spend.race);
       var last = t.messages[t.messages.length - 1];
       if (last && last.role === 'assistant') {
@@ -978,7 +1036,10 @@
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
   });
   $('send').onclick = submit;
-  $('model').onchange = saveStore;
+  $('model').onchange = function () {
+    saveStore();
+    setDials();
+  };
   if ($('tierSel')) {
     $('tierSel').onchange = function () {
       active().tier = window.OpenZooRace ? OpenZooRace.normalizeTier($('tierSel').value) : $('tierSel').value;

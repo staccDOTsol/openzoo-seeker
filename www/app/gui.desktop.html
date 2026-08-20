@@ -54,9 +54,12 @@
 <header data-component="topbar">
   <span data-role="logo" style="font-size:22px">🦓</span>
   <h1 data-role="title">openzoo</h1>
-  <input id="model" list="modelList" data-component="model-picker" placeholder="🔎 pick an animal…"
+  <input id="model" list="modelList" data-component="model-picker" placeholder="🦓 Auto — or pin an animal"
+    value="openzoo/auto"
     style="border:1px solid var(--line);border-radius:12px;padding:6px 10px;background:var(--paper);width:280px">
-  <datalist id="modelList" data-component="model-datalist"></datalist>
+  <datalist id="modelList" data-component="model-datalist">
+    <option value="openzoo/auto" label="🦓 Auto"></option>
+  </datalist>
   <button class="ghost" id="brainBtn" data-component="brain-toggle">🧠 teach the zoo</button>
   <button class="ghost" id="newBtn" data-component="new-chat" title="fresh session">✨ new</button>
   <span class="chip" id="ctxChip" data-component="ctx-chip" style="display:none"></span>
@@ -93,9 +96,12 @@ paste a huge corpus with 🧠 and ask questions against it for pennies: it never
   </div>
 </footer>
 
+<script src="auto.js"></script>
 <script data-component="app-script">
 const $ = (id) => document.getElementById(id);
 const SKEY = "openzoo.session.v1";
+const Auto = window.OpenZooAuto || {};
+const AUTO_MODEL = Auto.AUTO_MODEL || "openzoo/auto";
 const state = Object.assign(
   { messages: [], ctx: null, spent: 0, direct: 0, calls: 0, model: "" },
   JSON.parse(localStorage.getItem(SKEY) || "{}"),
@@ -106,29 +112,38 @@ function persist() {
   localStorage.setItem(SKEY, JSON.stringify({ messages, ctx, spent, direct, calls, model: $("model")?.value || "" }));
 }
 
-const ANIMAL = (id) => id.startsWith("anthropic") ? "🦒" : id.startsWith("openai") ? "🦉"
+const ANIMAL = (id) => Auto.isAuto && Auto.isAuto(id) ? "🦓" : id.startsWith("openzoo") ? "🦓" : id.startsWith("anthropic") ? "🦒" : id.startsWith("openai") ? "🦉"
   : id.startsWith("deepseek") ? "🐋" : id.startsWith("x-ai") ? "🦊" : id.startsWith("google") ? "🐦"
   : id.startsWith("meta") ? "🦙" : id.startsWith("mistral") ? "🐈" : id.startsWith("qwen") ? "🐼" : "🐾";
+
+function selectedModel() {
+  return Auto.resolveSendModel
+    ? Auto.resolveSendModel($("model")?.value, state.model)
+    : ($("model")?.value || state.model || AUTO_MODEL);
+}
 
 async function loadModels() {
   try {
     const r = await fetch("/v1/models");
     const d = await r.json();
-    const models = (d.data || []).filter((m) => !m.id.startsWith("~") && !m.id.includes(":batch"));
+    let models = (d.data || []).filter((m) => !m.id.startsWith("~") && !m.id.includes(":batch"));
     models.sort((a, b) => a.id.localeCompare(b.id));
+    models = Auto.mergeCatalog ? Auto.mergeCatalog(models) : [{ id: AUTO_MODEL }, ...models];
     const dl = $("modelList");
     dl.innerHTML = "";
     for (const m of models) {
       const o = document.createElement("option");
       o.value = m.id;
       o.setAttribute("data-option", m.id);
-      const inM = m.pricing?.prompt ? (1e6 * m.pricing.prompt).toFixed(2) : "?";
-      o.label = `${ANIMAL(m.id)} $${inM}/M`;
+      if (Auto.isAuto && Auto.isAuto(m.id)) o.label = "🦓 Auto";
+      else {
+        const inM = m.pricing?.prompt ? (1e6 * m.pricing.prompt).toFixed(2) : "?";
+        o.label = `${ANIMAL(m.id)} $${inM}/M`;
+      }
       dl.appendChild(o);
     }
-    if (!$("model").value) {
-      const pick = models.find((m) => m.id.includes("deepseek-v4-pro")) || models[0];
-      if (pick) $("model").value = pick.id;
+    if (!Auto.isPinned || !Auto.isPinned($("model").value)) {
+      $("model").value = Auto.isPinned && Auto.isPinned(state.model) ? state.model : AUTO_MODEL;
     }
     $("netChip").textContent = `${models.length} animals`;
     $("netChip").classList.add("on");
@@ -176,9 +191,9 @@ async function send() {
       // a whole essay of invisible reasoning and zero visible words (measured
       // live: deepseek, finish_reason "length", empty content, $0.0172)
       body: JSON.stringify({
-        model: $("model").value,
+        model: selectedModel(),
         messages: state.messages,
-        max_tokens: /deepseek|grok|thinking|fable|sonnet-5|-r1|reason/i.test($("model").value) ? 16384 : 4096,
+        max_tokens: (Auto.isAuto && Auto.isAuto(selectedModel())) || /deepseek|grok|thinking|fable|sonnet-5|-r1|reason/i.test(selectedModel()) ? 16384 : 4096,
       }),
     });
     const d = await r.json();
@@ -197,6 +212,8 @@ async function send() {
     if (typeof x.directUsd === "number") state.direct = (state.direct || 0) + x.directUsd;
     const bits = [];
     if (typeof x.billedUsd === "number") bits.push(`$${x.billedUsd.toFixed(4)}`);
+    const routed = Auto.routedModelId ? Auto.routedModelId(d, selectedModel()) : "";
+    if (routed) bits.push(routed);
     if (x.lecore?.engaged) bits.push(`🧠 ${x.lecore.recalled ?? "?"} slices`);
     if (bits.length) thinking.parentElement.querySelector("[data-role=bubble-meta]")?.remove(),
       thinking.insertAdjacentHTML("afterend", `<div class="meta" data-role="bubble-meta">${bits.join(" · ")}</div>`);
@@ -242,7 +259,7 @@ function restore() {
   const restoreX = state.spent > 0 && typeof state.direct === "number" ? state.direct / state.spent : null;
   if (restoreX) $("saved").textContent = `${restoreX >= 100 ? Math.round(restoreX) : restoreX.toFixed(restoreX >= 10 ? 1 : 2)}× vs direct`;
   if (state.calls) $("calls").textContent = `${state.calls} call${state.calls === 1 ? "" : "s"}`;
-  if (state.model) $("model").value = state.model;
+  $("model").value = Auto.isPinned && Auto.isPinned(state.model) ? state.model : AUTO_MODEL;
   if (state.ctx) {
     const chip = $("ctxChip");
     chip.style.display = "";
