@@ -426,18 +426,23 @@
     if (!tierSel || !raceSel) return;
     tierSel.value = spend.tier;
     raceSel.value = OpenZooRace.raceSelectValue(spend.race, spend.raceNeed);
-    var racing = spend.race >= 2;
+    var autoOn = Auto && Auto.isAuto(modelSel && modelSel.value);
+    var racing = spend.race >= 2 && !autoOn;
     if (modelSel) {
-      modelSel.disabled = racing;
-      modelSel.className = 'dial' + (racing ? ' pinned' : '');
-      modelSel.title = racing
-        ? 'Racing the ' + spend.tier + ' band — pick 1 model to pin a single model.'
-        : 'Auto lets the sidecar pick. Pin a real model to lock one.';
+      modelSel.disabled = false;
+      modelSel.className = 'dial';
+      modelSel.title = autoOn
+        ? 'Auto lets the door pick. Pin a real model to lock one.'
+        : (racing
+          ? 'Racing the ' + spend.tier + ' band. Switch to Auto for one server-classified call.'
+          : 'Pinned. Switch to Auto to let the door pick.');
     }
     tierSel.className = 'dial' + (spend.tier === 'expensive' || spend.tier === 'grok4.6' ? ' hot' : '');
     raceSel.className = 'dial' + (racing ? ' hot' : '');
     tierSel.title = 'How much to spend per turn when racing';
-    raceSel.title = 'Ask N models from the tier at once. First X countable back are judged. You pay for every entrant.';
+    raceSel.title = autoOn
+      ? 'Pin a real model to race this tier. Auto is one server-classified call.'
+      : 'Ask N models from the tier at once. First X countable back are judged. You pay for every entrant.';
   }
 
   function renderHud() {
@@ -895,17 +900,13 @@
       if (corpus) await attachQuietly(t, corpus);
       var history = completedHistory(t);
       var spend = spendOf(t);
-      var racing = window.OpenZooRace && spend.race >= 2;
+      var racing = window.OpenZooRace && spend.race >= 2 && !(Auto && Auto.isAuto(pinnedModel()));
       var content = '';
       var lastX402 = {};
       var lastRouted = '';
       if (racing) {
         if (window.OpenZooPay) OpenZooPay.clearPending402();
         var models = OpenZooRace.tierModels(spend.tier, spend.race, true, modelIds);
-        if (Auto && Auto.isAuto(pinnedModel()) && Auto.shortlist) {
-          var picked = await Auto.shortlist(text, spend.race);
-          if (picked && picked.length) models = picked;
-        }
         if (models.length < 2) {
           racing = false;
         } else {
@@ -1122,7 +1123,10 @@
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
   });
   $('send').onclick = submit;
-  $('model').onchange = saveStore;
+  $('model').onchange = function () {
+    saveStore();
+    setDials();
+  };
   if ($('tierSel')) {
     $('tierSel').onchange = function () {
       active().tier = window.OpenZooRace ? OpenZooRace.normalizeTier($('tierSel').value) : $('tierSel').value;

@@ -24,7 +24,7 @@ The shell owns the wallet. The UI never sees a key. There is no local `:8402` si
 
 Attach is abstract: you drop files, a folder, or notes. The app keeps a corpus with that thread behind the scenes. Chat uses the same Claude / `npx openzoo claude` spill path: a context id per thread, older turns bound once, later calls send a short tail plus that id. Completions never pair `x-hrr-context` with the growing messages array. The screen never shows context ids, bind routes, or wrap-twin homework. HUD savings is `directUsd / spentUsd`, not a running sum of `savesVsDirect`.
 
-The model picker defaults to **Auto** (`openzoo/auto`). Unpinned chats send that virtual id; the sidecar picks the cheapest model that can finish. After a reply the bubble meta shows the routed id compactly. Pin a real catalog model to lock one. This is model selection, not auto-run tools.
+The model picker defaults to **Auto** (`openzoo/auto`). Unpinned chats send that virtual id; the gateway classifier (the door) picks the cheapest model that can finish. After a reply the bubble meta shows the routed id compactly. Pin a real catalog model to lock one. This is model selection, not a local sidecar picker and not auto-run tools. Race stays for a pinned model or tier — Auto + race still sends one `openzoo/auto` call.
 
 Reasoning stays behind a collapsed **thinking...** row. Click to unfurl, click again to furl. While a reply streams, chain-of-thought does not enter the open transcript unless that row is open. No chip if the model did not reason.
 

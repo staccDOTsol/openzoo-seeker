@@ -504,6 +504,8 @@ async function run() {
     assert.doesNotMatch(raceJs, /\bSPAWN:/);
     assert.doesNotMatch(app, /Play Billing|billingClient|com\.android\.vending/i);
     assert.doesNotMatch(html, /Play Billing/i);
+    assert.doesNotMatch(app, /Auto\.shortlist|\/v1\/route|127\.0\.0\.1:8402/);
+    assert.match(app, /spend\.race >= 2 && !\(Auto && Auto\.isAuto\(pinnedModel\(\)\)\)/);
   });
 
   console.log('\n' + passed + ' race checks passed');
