@@ -150,6 +150,27 @@ async function run() {
     assert.doesNotMatch(autoJs, /function classify|routeAuto\(|SCORE this prompt/);
   });
 
+  await check('Auto is the gateway classifier — no local /route shortlist', () => {
+    const app = read('www/app/app.js');
+    const html = read('www/app/index.html');
+    const autoJs = read('www/app/auto.js');
+    const desktop = read('www/app/gui.desktop.html');
+    assert.strictEqual(typeof auto.shortlist, 'undefined');
+    assert.doesNotMatch(autoJs, /function shortlist/);
+    assert.doesNotMatch(autoJs, /127\.0\.0\.1:8402/);
+    assert.doesNotMatch(autoJs, /\/v1\/route/);
+    assert.doesNotMatch(app, /127\.0\.0\.1:8402/);
+    assert.doesNotMatch(app, /\/v1\/route/);
+    assert.doesNotMatch(app, /Auto\.shortlist|models = picked/);
+    assert.match(app, /spend\.race >= 2 && !\(Auto && Auto\.isAuto\(pinnedModel\(\)\)\)/);
+    assert.match(app, /model:\s*model/);
+    assert.match(html, /Auto lets the door pick/);
+    assert.doesNotMatch(html, /sidecar pick/);
+    assert.match(desktop, /Auto lets the door pick/);
+    assert.doesNotMatch(desktop, /sidecar pick/);
+    assert.doesNotMatch(autoJs, /sidecar \(desktop\/npx|sidecar routing/);
+  });
+
   console.log('\n' + passed + ' auto-model checks passed');
 }
 

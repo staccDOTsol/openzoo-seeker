@@ -239,9 +239,11 @@ async function run() {
     assert.doesNotMatch(html, /:8402/);
     assert.doesNotMatch(html, /yUSDCx|wLEOSx/);
     const js = fs.readFileSync(path.join(__dirname, '..', 'www/app/app.js'), 'utf8');
+    const autoJs = fs.readFileSync(path.join(__dirname, '..', 'www/app/auto.js'), 'utf8');
     assert.doesNotMatch(js, DRAIN_RE);
     assert.doesNotMatch(js, /:8402/);
     assert.doesNotMatch(js, /wTOKENx|yUSDCx|wLEOSx/);
+    assert.doesNotMatch(autoJs, /127\.0\.0\.1:8402|\/v1\/route/);
     assert.match(js, /Wrap enough to send this\?/);
     assert.match(js, /Needs a little SOL for the network fee/);
   });
