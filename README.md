@@ -45,7 +45,7 @@ Do not invent `/api/occ` or a second path set. `/goal` is a message string, not 
 | `POST` | `/occ/sessions/:id/files` | multipart `file` or JSON `{ name, content, encoding: "base64" }` |
 | `POST` | `/occ/sessions/:id/stop` | interrupt |
 
-SSE events: `{ type: delta\|text\|output\|status\|pty\|done\|error }` and OpenAI-style `{ choices: [{ delta: { content } }] }`.
+SSE events: `{ type: delta|text|output|status|pty|done|error }` and OpenAI-style `{ choices: [{ delta: { content } }] }`.
 
 Every OCC/upload call sends `Authorization: Bearer <subscription key>`.
 

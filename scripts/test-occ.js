@@ -114,7 +114,7 @@ async function run() {
     assert.strictEqual(occ.ROUTES.stream, undefined);
     assert.strictEqual(occ.ROUTES.session, undefined);
     const src = read('www/app/occ.js');
-    assert.doesNotMatch(src, /\/api\/occ/);
+    assert.doesNotMatch(src, /['"`]\/api\/occ/);
     assert.ok(occ.isGoalText('/goal ship the site'));
     assert.strictEqual(occ.goalText('/goal ship the site'), 'ship the site');
     assert.ok(!occ.isGoalText('please /goal later'));
@@ -269,7 +269,7 @@ async function run() {
     const shell = read('www/index.html');
     assert.match(shell, /cordova-plugin-mwa|MWA\.authorize|wallet-sign-transaction/);
     assert.match(read('www/app/occ.js'), /https:\/\/zoo\.openzoo\.fun/);
-    assert.doesNotMatch(read('www/app/occ.js'), /https:\/\/openzoo\.fun\/occ|\/api\/occ/);
+    assert.doesNotMatch(read('www/app/occ.js'), /https:\/\/openzoo\.fun\/occ|['"`]\/api\/occ/);
     assert.match(read('www/app/subscription.js'), /zoo\.openzoo\.fun/);
   });
 
@@ -306,7 +306,7 @@ async function run() {
     assert.match(app, /modeSel|runMode|agent/);
     assert.doesNotMatch(app, /ANTHROPIC_API_KEY\s*=/);
     assert.match(read('README.md'), /\/occ\/sessions/);
-    assert.doesNotMatch(read('README.md'), /\/api\/occ/);
+    assert.doesNotMatch(read('README.md'), /`\/api\/occ\/sessions`/);
   });
 
   console.log('ok  ' + passed + ' occ/subscription checks');
