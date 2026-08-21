@@ -305,8 +305,16 @@ async function run() {
     assert.match(html, /subscription\.js/);
     assert.match(html, /ide\.js/);
     assert.doesNotMatch(html, /occ\.js/);
-    assert.match(html, /id="ideFrame"/);
+    assert.match(html, /id="agentFrame"/);
+    assert.doesNotMatch(html, /id="ideFrame"/);
     assert.match(html, /data-component="agent-ide"/);
+    assert.match(html, /viewport-fit=cover/);
+    assert.match(html, /#agentFrame\s*\{[^}]*inset:\s*0/);
+    assert.match(html, /body\.agent-ide\s+#bar/);
+    assert.match(html, /display:\s*none\s*!important/);
+    assert.doesNotMatch(html, /#agentFrame[^}]*max-width:\s*\d/);
+    assert.doesNotMatch(html, /letterbox|aspect-ratio:\s*16\s*\/\s*9/i);
+    assert.match(app, /\$\('agentFrame'\)/);
     assert.match(app, /OpenZooIde/);
     assert.match(app, /OpenZooSub/);
     assert.match(app, /ide-no-key|hasSubscriptionKey/);

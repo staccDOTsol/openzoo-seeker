@@ -30,7 +30,7 @@ Phones cannot pack an IDE. Agent is a remote code-server + Cline session. Host a
 Authorization: Bearer <OpenZoo subscription key>
 ```
 
-`POST` or `GET` `/ide/session` → `{ url, password?, id }`. The app loads `url` in the Agent webview. No key → no session. The dummy gateway string `Bearer openzoo-seeker` is **not** a subscription key. Never `ANTHROPIC_API_KEY`. Never an open / hardcoded IDE URL. Agent IDE uses the **subscription Bearer**, not a wallet token. x402 + MWA stays the **Chat** pay path (`https://x402-tokens.fly.dev`).
+`POST` or `GET` `/ide/session` → `{ url, password?, id }`. The app loads `url` in `#agentFrame`. On a handheld that webview is **full-bleed** (`viewport-fit=cover`) and fills Agent mode — no nested desktop IDE letterbox. The Chat composer is hidden in Agent mode. No key → no session. The dummy gateway string `Bearer openzoo-seeker` is **not** a subscription key. Never `ANTHROPIC_API_KEY`. Never an open / hardcoded IDE URL. Agent IDE uses the **subscription Bearer**, not a wallet token. x402 + MWA stays the **Chat** pay path (`https://x402-tokens.fly.dev`).
 
 Paste the key (or a `https://zoo.openzoo.fun/billing/done?session=…` URL) in the wallet sheet. Chat keeps working without it.
 

@@ -372,14 +372,14 @@
   }
 
   function unloadIdeFrame() {
-    var frame = $('ideFrame');
+    var frame = $('agentFrame');
     if (!frame) return;
     frame.removeAttribute('data-src');
     frame.removeAttribute('src');
   }
 
   function loadIdeFrame(sess) {
-    var frame = $('ideFrame');
+    var frame = $('agentFrame');
     if (!frame || !Ide) return;
     var src = Ide.frameSrc(sess);
     if (frame.getAttribute('data-src') === src) return;
@@ -391,8 +391,10 @@
     var on = isAgent(active());
     document.body.classList.toggle('agent-ide', on);
     document.body.classList.toggle('ide-need-key', on && !hasAgentKey());
-    var pane = $('idePane');
+    var pane = $('agentPane');
     if (pane) pane.hidden = !on;
+    var bar = $('bar');
+    if (bar) bar.hidden = on;
   }
 
   function handleIdeError(thread, e) {
@@ -714,7 +716,7 @@
     renderAttach();
     updateSend();
     setAgentChrome();
-    var frame = $('ideFrame');
+    var frame = $('agentFrame');
     if (isAgent(active()) && hasAgentKey() && frame && !frame.getAttribute('data-src')) {
       openAgentIde(active()).catch(function (e) { handleIdeError(active(), e); });
     }
