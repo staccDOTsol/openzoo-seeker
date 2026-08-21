@@ -1,14 +1,18 @@
-/* Hosted OCC client for Seeker.
+/* Hosted OCC client for Seeker — same door as iOS/Android.
    Phones cannot run packed openzoo-claude. Agent is a remote OCC session
-   plus file upload to that session's cwd.
+   plus file upload.
 
-   Door: https://openzoo.fun (same product origin as MWA identity).
-   Host gate: Authorization: Bearer <subscription key>. No key → no session.
-   Inference pay: existing x402 + MWA (paidFetch). Never ANTHROPIC_API_KEY. */
+   Door: https://zoo.openzoo.fun
+   Paths: /occ/sessions, /occ/sessions/:id/messages, /occ/sessions/:id/files,
+          /occ/sessions/:id/stop. Do not invent /api/occ or a second set.
+   Host gate: Authorization: Bearer <OpenZoo subscription key> on every
+   OCC/upload call. No key → no session. Never an open OCC URL.
+   Never ANTHROPIC_API_KEY. Inference pay stays x402 + MWA (paidFetch).
+   OCC Authorization is the subscription Bearer, not a wallet token. */
 (function (root) {
   'use strict';
 
-  var OCC_ORIGIN = 'https://openzoo.fun';
+  var OCC_ORIGIN = 'https://zoo.openzoo.fun';
   var DEFAULT_CWD = '/workspace';
   var CLIENT = 'openzoo-seeker';
 
@@ -27,21 +31,11 @@
     return e;
   }
 
-  function encodePath(rel) {
-    return String(rel || '').replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/');
-  }
-
   var ROUTES = {
-    sessions: '/api/occ/sessions',
-    session: function (id) { return '/api/occ/sessions/' + encodeURIComponent(id); },
-    messages: function (id) { return '/api/occ/sessions/' + encodeURIComponent(id) + '/messages'; },
-    goal: function (id) { return '/api/occ/sessions/' + encodeURIComponent(id) + '/goal'; },
-    files: function (id, rel) {
-      var q = encodePath(rel);
-      return '/api/occ/sessions/' + encodeURIComponent(id) + '/files' + (q ? ('?path=' + q) : '');
-    },
-    stream: function (id) { return '/api/occ/sessions/' + encodeURIComponent(id) + '/stream'; },
-    stop: function (id) { return '/api/occ/sessions/' + encodeURIComponent(id) + '/stop'; }
+    sessions: '/occ/sessions',
+    messages: function (id) { return '/occ/sessions/' + encodeURIComponent(id) + '/messages'; },
+    files: function (id) { return '/occ/sessions/' + encodeURIComponent(id) + '/files'; },
+    stop: function (id) { return '/occ/sessions/' + encodeURIComponent(id) + '/stop'; }
   };
 
   function occUrl(path) {
@@ -93,10 +87,7 @@
     return false;
   }
 
-  async function occFetch(path, init, ctx) {
-    ctx = ctx || {};
-    init = init || {};
-    var headers = hostHeaders(ctx.subscription, init.headers);
+  function assertHostAuth(headers) {
     if (looksAnthropicKeyHeader(headers)) {
       throw OccError('Agent never sends ANTHROPIC_API_KEY.', { code: 'occ-no-anthropic' });
     }
@@ -112,12 +103,23 @@
         status: 401
       });
     }
+  }
+
+  async function occFetch(path, init, ctx) {
+    ctx = ctx || {};
+    init = init || {};
+    var headers = hostHeaders(ctx.subscription, init.headers);
+    assertHostAuth(headers);
     var url = /^https?:\/\//i.test(path) ? path : occUrl(path);
+    if (url.indexOf(OCC_ORIGIN + '/occ/') !== 0) {
+      throw OccError('OCC calls stay on the zoo door /occ routes.', { code: 'occ-bad-url' });
+    }
     var opts = Object.assign({}, init, { headers: headers });
-    var doFetch = ctx.paidFetch || ctx.fetch || (typeof fetch === 'function' ? fetch : null);
+    var usePay = !!(ctx.pay && ctx.paidFetch);
+    var doFetch = usePay ? ctx.paidFetch : (ctx.fetch || (typeof fetch === 'function' ? fetch : null));
     if (!doFetch) throw OccError('no fetch', { code: 'occ-no-fetch' });
     var res;
-    if (ctx.paidFetch) res = await ctx.paidFetch(url, opts, ctx.payCtx || {});
+    if (usePay) res = await ctx.paidFetch(url, opts, ctx.payCtx || {});
     else res = await doFetch(url, opts);
     if (res && res.status === 401) {
       throw OccError('Subscription key refused — paste a live OpenZoo key to open Agent.', {
@@ -146,9 +148,8 @@
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        client: CLIENT,
-        cwd: ctx.cwd || DEFAULT_CWD,
-        model: ctx.model || undefined
+        threadId: ctx.threadId || (ctx.thread && ctx.thread.id) || undefined,
+        name: ctx.name || (ctx.thread && ctx.thread.name) || undefined
       })
     }, ctx);
     var body = await res.json().catch(function () { return {}; });
@@ -163,36 +164,45 @@
     return sess;
   }
 
-  async function getSession(id, ctx) {
-    var res = await occFetch(ROUTES.session(id), { method: 'GET' }, ctx);
-    var body = await res.json().catch(function () { return {}; });
-    if (!res.ok) {
-      throw OccError((body && (body.error || body.message)) || ('OCC session HTTP ' + res.status), {
-        code: res.status === 404 ? 'occ-gone' : 'occ-session',
-        status: res.status
-      });
-    }
-    return parseSession(body) || { id: id, cwd: DEFAULT_CWD };
+  function toBase64(raw) {
+    var s = raw == null ? '' : (typeof raw === 'string' ? raw : String(raw));
+    if (typeof Buffer !== 'undefined') return Buffer.from(s, 'utf8').toString('base64');
+    return btoa(unescape(encodeURIComponent(s)));
   }
 
-  function fileBody(file) {
-    if (!file) return { body: '', type: 'text/plain' };
-    if (file.file) return { body: file.file, type: file.file.type || 'application/octet-stream' };
-    if (file.blob) return { body: file.blob, type: file.type || 'application/octet-stream' };
-    if (file.content != null) {
-      return { body: String(file.content), type: 'text/plain; charset=utf-8' };
+  function fileName(file) {
+    return (file && (file.name || file.path)) || 'upload.bin';
+  }
+
+  function uploadInit(file) {
+    var name = fileName(file);
+    var blob = file && (file.file || file.blob);
+    if (blob && typeof FormData !== 'undefined') {
+      var fd = new FormData();
+      if (typeof blob === 'object' && typeof File !== 'undefined' && blob instanceof File) {
+        fd.append('file', blob, name);
+      } else if (typeof Blob !== 'undefined' && blob instanceof Blob) {
+        fd.append('file', blob, name);
+      } else {
+        fd.append('file', blob, name);
+      }
+      return { method: 'POST', body: fd };
     }
-    return { body: '', type: 'text/plain' };
+    var content = file && file.content != null ? file.content : '';
+    var alreadyB64 = file && String(file.encoding || '').toLowerCase() === 'base64';
+    return {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: name,
+        content: alreadyB64 ? String(content) : toBase64(content),
+        encoding: 'base64'
+      })
+    };
   }
 
   async function uploadFile(sessionId, file, ctx) {
-    var rel = (file && (file.name || file.path)) || 'upload.bin';
-    var packed = fileBody(file);
-    var res = await occFetch(ROUTES.files(sessionId, rel), {
-      method: 'PUT',
-      headers: { 'content-type': packed.type },
-      body: packed.body
-    }, ctx);
+    var res = await occFetch(ROUTES.files(sessionId), uploadInit(file), ctx);
     var body = await res.json().catch(function () { return {}; });
     if (!res.ok) {
       throw OccError((body && (body.error || body.message)) || ('upload HTTP ' + res.status), {
@@ -200,10 +210,11 @@
         status: res.status
       });
     }
+    var name = fileName(file);
     return {
-      path: (body.path || rel),
+      path: (body.path || body.name || name),
       cwd: body.cwd || DEFAULT_CWD,
-      wrote: body.wrote || [rel]
+      wrote: body.wrote || [name]
     };
   }
 
@@ -219,21 +230,34 @@
   function eventText(ev) {
     if (ev == null) return '';
     if (typeof ev === 'string') return ev;
-    if (ev.text) return String(ev.text);
-    if (ev.content) return String(ev.content);
+    if (ev.type === 'error' || ev.type === 'done' || ev.type === 'status') return '';
+    if (typeof ev.delta === 'string') return ev.delta;
     if (ev.delta && ev.delta.content) return String(ev.delta.content);
+    if (ev.text) return String(ev.text);
+    if (ev.content && typeof ev.content === 'string') return String(ev.content);
+    if (ev.output) return String(ev.output);
+    if (ev.pty) return String(ev.pty);
     var ch = ev.choices && ev.choices[0];
     if (ch && ch.delta && ch.delta.content) return String(ch.delta.content);
     if (ch && ch.message && ch.message.content) return String(ch.message.content);
-    if (ev.output) return String(ev.output);
     return '';
+  }
+
+  function eventError(ev) {
+    if (!ev || typeof ev !== 'object') return '';
+    if (ev.type !== 'error') return '';
+    if (typeof ev.error === 'string') return ev.error;
+    if (ev.error && ev.error.message) return String(ev.error.message);
+    return String(ev.message || ev.text || 'OCC error');
   }
 
   async function readSSE(res, onDelta) {
     if (!res || !res.body || !res.body.getReader) {
       var d = await res.json().catch(function () { return {}; });
+      var err0 = eventError(d);
+      if (err0) throw OccError(err0, { code: 'occ-turn', status: res.status });
       var text = eventText(d);
-      if (text && onDelta) onDelta(text, { replace: true });
+      if (text && onDelta) onDelta(text, { replace: true, event: d });
       return { text: text, body: d, streamed: false };
     }
     var reader = res.body.getReader();
@@ -241,6 +265,7 @@
     var buf = '';
     var text = '';
     var last = {};
+    var eventName = '';
     while (true) {
       var chunk = await reader.read();
       if (chunk.done) break;
@@ -249,19 +274,32 @@
       buf = lines.pop();
       for (var i = 0; i < lines.length; i++) {
         var line = lines[i];
+        if (!line) {
+          eventName = '';
+          continue;
+        }
+        if (line.indexOf('event:') === 0) {
+          eventName = line.slice(6).trim();
+          continue;
+        }
         if (line.indexOf('data:') !== 0) continue;
         var payload = line.slice(5).trim();
         if (!payload || payload === '[DONE]') continue;
         try {
           var ev = JSON.parse(payload);
+          if (eventName && !ev.type) ev.type = eventName;
           last = ev;
+          var err = eventError(ev);
+          if (err) throw OccError(err, { code: 'occ-turn', event: ev });
+          if (ev.type === 'done') continue;
           var piece = eventText(ev);
           if (piece) {
             if (ev.replace) text = piece;
             else text += piece;
             if (onDelta) onDelta(piece, { replace: !!ev.replace, event: ev });
           }
-        } catch (_) {
+        } catch (e) {
+          if (e && e.code === 'occ-turn') throw e;
           text += payload;
           if (onDelta) onDelta(payload, {});
         }
@@ -270,31 +308,35 @@
     return { text: text, body: last, streamed: true };
   }
 
-  async function postTurn(sessionId, kind, text, ctx) {
+  function messageBody(text) {
+    var line = String(text || '');
+    return { text: line, message: line, stream: true };
+  }
+
+  async function sendMessage(sessionId, text, ctx) {
     ctx = ctx || {};
-    var path = kind === 'goal' ? ROUTES.goal(sessionId) : ROUTES.messages(sessionId);
-    var body = kind === 'goal'
-      ? { goal: goalText(text), text: String(text || '').trim() }
-      : { text: String(text || ''), stream: true };
-    var res = await occFetch(path, {
+    var payCtx = Object.assign({}, ctx, { pay: true });
+    var res = await occFetch(ROUTES.messages(sessionId), {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
-      body: JSON.stringify(body)
-    }, ctx);
+      body: JSON.stringify(messageBody(text))
+    }, payCtx);
     var ct = '';
     try { ct = (res.headers && res.headers.get && res.headers.get('content-type')) || ''; } catch (_) {}
     if (/event-stream/i.test(ct) || (res.body && res.body.getReader && ctx.stream !== false)) {
       var streamed = await readSSE(res, ctx.onDelta);
       if (!res.ok && !streamed.text) {
-        throw OccError('OCC ' + kind + ' HTTP ' + res.status, { code: 'occ-turn', status: res.status });
+        throw OccError('OCC message HTTP ' + res.status, { code: 'occ-turn', status: res.status });
       }
       return { ok: res.ok, status: res.status, text: streamed.text, body: streamed.body, streamed: true };
     }
     var json = await res.json().catch(function () { return {}; });
+    var err = eventError(json);
+    if (err) throw OccError(err, { code: 'occ-turn', status: res.status });
     var out = eventText(json);
-    if (out && ctx.onDelta) ctx.onDelta(out, { replace: true });
+    if (out && ctx.onDelta) ctx.onDelta(out, { replace: true, event: json });
     if (!res.ok) {
-      throw OccError((json && (json.error || json.message)) || ('OCC ' + kind + ' HTTP ' + res.status), {
+      throw OccError((json && (json.error || json.message)) || ('OCC message HTTP ' + res.status), {
         code: 'occ-turn',
         status: res.status
       });
@@ -302,14 +344,10 @@
     return { ok: true, status: res.status, text: out, body: json, streamed: false };
   }
 
-  async function sendMessage(sessionId, text, ctx) {
-    return postTurn(sessionId, isGoalText(text) ? 'goal' : 'message', text, ctx);
-  }
-
   async function sendGoal(sessionId, text, ctx) {
     var line = String(text || '').trim();
     if (!isGoalText(line)) line = '/goal ' + line;
-    return postTurn(sessionId, 'goal', line, ctx);
+    return sendMessage(sessionId, line, ctx);
   }
 
   async function stopSession(sessionId, ctx) {
@@ -333,12 +371,12 @@
     hostHeaders: hostHeaders,
     occFetch: occFetch,
     createSession: createSession,
-    getSession: getSession,
     uploadFile: uploadFile,
     uploadFiles: uploadFiles,
     sendMessage: sendMessage,
     sendGoal: sendGoal,
     stopSession: stopSession,
+    eventText: eventText,
     OccError: OccError
   };
 

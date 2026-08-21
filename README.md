@@ -20,33 +20,37 @@ This repository is a fork of [FreeSolDev/CordovaSeeker](https://github.com/FreeS
 └────────────────────────────────────────────┘
 ```
 
-The shell owns the wallet. The UI never sees a key. There is no local `:8402` sidecar and no iframe of `openzoo.fun`. Chat stays on the bundled UI. **Agent** is hosted OCC + upload on the same product origin as this app's MWA identity (`https://openzoo.fun`) — phones cannot run packed `openzoo-claude`.
+The shell owns the wallet. The UI never sees a key. There is no local `:8402` sidecar and no iframe of `openzoo.fun`. Chat stays on the bundled UI. **Agent** is hosted OCC + upload on `https://zoo.openzoo.fun` — the same door as iOS/Android. Phones cannot run packed `openzoo-claude`. MWA identity stays `https://openzoo.fun`.
 
 ## Agent (hosted OCC)
 
-Phones cannot pack a PTY. Agent is a remote OCC session on the openzoo.fun door, plus file upload into that session's cwd. Host access is gated:
+Phones cannot pack a PTY. Agent is a remote OCC session on `https://zoo.openzoo.fun`, plus file upload. Host access is gated on every OCC/upload call:
 
 ```
-Authorization: Bearer <subscription key>
+Authorization: Bearer <OpenZoo subscription key>
 ```
 
-No key → no Agent session. The dummy gateway string `Bearer openzoo-seeker` is **not** a subscription key. Never `ANTHROPIC_API_KEY`. x402 + MWA still pays inference; the OCC host is not a public unauthenticated PTY.
+No key → no Agent session. The dummy gateway string `Bearer openzoo-seeker` is **not** a subscription key. Never `ANTHROPIC_API_KEY`. Never an open OCC URL. x402 + MWA still pays inference (Chat and Agent 402s); OCC Authorization is the subscription Bearer, not a wallet token.
 
 Paste the key (or a `https://zoo.openzoo.fun/billing/done?session=…` URL) in the wallet sheet. Chat keeps working without it.
 
-### Door routes (openzoo.fun / staccDOTsol/openzoo)
+### Door routes (zoo.openzoo.fun — same as iOS/Android)
 
-Same origin as MWA identity. Billing key exchange stays on `zoo.openzoo.fun`.
+Do not invent `/api/occ` or a second path set. `/goal` is a message string, not its own route.
+
+| method | path | body |
+|---|---|---|
+| `POST` | `/occ/sessions` | `{ threadId, name }` → `{ id }` / `{ session_id }` |
+| `POST` | `/occ/sessions/:id/messages` | `{ text, message, stream: true }` — SSE. `/goal` is just a message string. |
+| `POST` | `/occ/sessions/:id/files` | multipart `file` or JSON `{ name, content, encoding: "base64" }` |
+| `POST` | `/occ/sessions/:id/stop` | interrupt |
+
+SSE events: `{ type: delta\|text\|output\|status\|pty\|done\|error }` and OpenAI-style `{ choices: [{ delta: { content } }] }`.
+
+Every OCC/upload call sends `Authorization: Bearer <subscription key>`.
 
 | method | path | auth | what |
 |---|---|---|---|
-| `POST` | `/api/occ/sessions` | subscription Bearer | open an Agent session (`{ id, cwd }`). No key → 401, no session |
-| `GET` | `/api/occ/sessions/:id` | subscription Bearer | session status |
-| `POST` | `/api/occ/sessions/:id/messages` | subscription Bearer; 402 → x402/MWA | Message. Streams SSE `data:` events |
-| `POST` | `/api/occ/sessions/:id/goal` | subscription Bearer; 402 → x402/MWA | `/goal <job>` (one slash) |
-| `PUT` | `/api/occ/sessions/:id/files?path=` | subscription Bearer | upload bytes into session cwd |
-| `GET` | `/api/occ/sessions/:id/stream` | subscription Bearer | live output |
-| `POST` | `/api/occ/sessions/:id/stop` | subscription Bearer | interrupt |
 | `GET` | `https://zoo.openzoo.fun/api/billing/tiers` | none | live plans |
 | `GET` | `https://zoo.openzoo.fun/api/billing/key?session=` | none | poll checkout → key |
 

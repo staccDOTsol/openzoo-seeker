@@ -383,7 +383,10 @@
     }
     if (thread.occSessionId) return { id: thread.occSessionId, cwd: thread.occCwd || Occ.DEFAULT_CWD };
     setBanner('opening Agent session…');
-    var sess = await Occ.createSession(occCtx());
+    var sess = await Occ.createSession(Object.assign(occCtx(), {
+      threadId: thread.id,
+      name: thread.name
+    }));
     thread.occSessionId = sess.id;
     thread.occCwd = sess.cwd;
     saveStore();
