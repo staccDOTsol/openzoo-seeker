@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta http-equiv="Content-Security-Policy"
-  content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://x402-tokens.fly.dev https://x402.accrue.fund https://api.mainnet-beta.solana.com https://solana-rpc.publicnode.com; img-src * data:; style-src 'self' 'unsafe-inline';">
+  content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://x402-tokens.fly.dev https://x402.accrue.fund https://openzoo.fun https://zoo.openzoo.fun https://api.mainnet-beta.solana.com https://solana-rpc.publicnode.com; img-src * data:; style-src 'self' 'unsafe-inline';">
 <title>openzoo</title>
 <style>
   :root { color-scheme: dark; }
@@ -42,6 +42,11 @@
   .dial.hot { color: #b8f240; border-color: #b8f240; }
   .dial:disabled, .dial.pinned { opacity: .45; cursor: default; }
   #hudChip { cursor: default; pointer-events: none; max-width: 200px; white-space: nowrap; }
+  #goalTip { display: none; padding: 6px 16px 0; font-size: 11px; color: #8e8e93; }
+  #goalTip.show { display: block; }
+  .subrow { border: 1px solid #1c1c1e; border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; }
+  #subKey { width: 100%; background: #1c1c1e; border: 1px solid #2c2c2e; color: #ececec;
+            border-radius: 10px; padding: 8px 10px; font: inherit; margin-top: 8px; }
   .icon-btn { width: 32px; height: 32px; border-radius: 50%; border: none; background: transparent;
               color: #ececec; display: flex; align-items: center; justify-content: center; cursor: pointer;
               flex: 0 0 32px; }
@@ -150,6 +155,19 @@
       <h3>Connected wallet</h3>
       <div class="wsub">This is the Seeker / Phantom wallet you connected with Mobile Wallet Adapter — <b>your</b> wallet, not a local burner key. Each call is paid from it. Keys never leave the wallet app. Tap the address to copy.</div>
       <div id="walletBody">loading…</div>
+      <div class="subrow" data-component="subscription-lane">
+        <div class="wlab">Agent host · subscription Bearer</div>
+        <div class="wsub" id="subStatus" style="margin:6px 0 0">No key — Agent stays closed. Chat still pays via x402.</div>
+        <input id="subKey" type="password" autocomplete="off" spellcheck="false"
+               placeholder="paste key or zoo.openzoo.fun/billing/done?session=…"
+               data-component="subscription-paste">
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+          <button class="ghost" id="subSave" type="button">Save key</button>
+          <button class="ghost" id="subClear" type="button">Remove key</button>
+          <a class="ghost" id="subPageLink" href="https://zoo.openzoo.fun/subscriptions" target="_blank" rel="noopener"
+             style="text-decoration:none;display:inline-flex;align-items:center">Subscriptions</a>
+        </div>
+      </div>
       <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
         <button class="ghost" id="topUpBtn" type="button">Top up</button>
         <button class="ghost" id="walletClose" type="button">Close</button>
@@ -219,11 +237,17 @@
         </select>
         <select class="dial" id="model" data-component="model-picker" aria-label="Model"
                 title="Auto lets the sidecar pick. Pin a real model to lock one."></select>
+        <select class="dial" id="modeSel" data-component="run-mode" aria-label="Chat or Agent"
+                title="Chat is completions + x402. Agent is hosted OCC + upload (needs a subscription Bearer).">
+          <option value="chat">Chat</option>
+          <option value="agent">Agent</option>
+        </select>
         <button class="dial" id="walletBtn" data-component="wallet-open">wallet</button>
         <button class="dial" id="leaveBtn" data-component="leave-button">leave</button>
       </div>
     </div>
     <div id="banner" data-component="status-banner"></div>
+    <div id="goalTip" data-component="goal-tip">Pro tip: /goal &lt;job&gt; — one slash. Agent keeps working until it's done.</div>
     <div id="log" data-component="chat-log"></div>
     <div id="bar">
       <div id="plusMenu" data-component="attach-menu">
@@ -257,6 +281,8 @@
   <script src="race.js"></script>
   <script src="auto.js"></script>
   <script src="think.js"></script>
+  <script src="subscription.js"></script>
+  <script src="occ.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

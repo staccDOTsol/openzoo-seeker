@@ -1,7 +1,9 @@
-/* grokui-on-a-phone: threads + chat + wallet.
-   Attach binds files. Chat spills the transcript prefix (Claude / npx openzoo
-   claude path) and later turns send a short tail + context id — never the
-   growing thread together with x-hrr-context. */
+/* grokui-on-a-phone: threads + chat + wallet + hosted OCC Agent.
+   Chat: attach binds files; later turns spill a short tail + context id —
+   never the growing thread together with x-hrr-context.
+   Agent: hosted OCC + upload to session cwd (phones cannot run packed
+   openzoo-claude). Host gate is a subscription Bearer. x402/MWA still pays
+   inference. Never ANTHROPIC_API_KEY. */
 (function () {
   'use strict';
 
@@ -19,6 +21,8 @@
   var Auto = window.OpenZooAuto;
   var AUTO_MODEL = (Auto && Auto.AUTO_MODEL) || 'openzoo/auto';
   var Think = window.OpenZooThink;
+  var Sub = window.OpenZooSub;
+  var Occ = window.OpenZooOcc;
 
   function $(id) { return document.getElementById(id); }
 
@@ -32,6 +36,7 @@
       threads: state.threads,
       activeId: state.activeId,
       model: $('model') && $('model').value,
+      mode: t && t.mode,
       tier: t && t.tier,
       race: t && t.race,
       raceNeed: t && t.raceNeed
@@ -90,6 +95,10 @@
       memory: null,
       spillCorpus: '',
       preview: '',
+      mode: 'chat',
+      occSessionId: null,
+      occCwd: null,
+      goalSet: false,
       tier: spend.tier,
       race: spend.race,
       raceNeed: spend.raceNeed
@@ -283,6 +292,107 @@
     };
   }
 
+  function runMode(thread) {
+    return (thread && thread.mode) === 'agent' ? 'agent' : 'chat';
+  }
+
+  function isAgent(thread) {
+    return runMode(thread || active()) === 'agent';
+  }
+
+  function subRec() {
+    return Sub ? Sub.loadSubscription() : null;
+  }
+
+  function hasAgentKey() {
+    return !!(Sub && Sub.hasSubscriptionKey(subRec()));
+  }
+
+  function occCtx() {
+    return {
+      subscription: subRec(),
+      paidFetch: window.OpenZooPay && OpenZooPay.paidFetch,
+      payCtx: payCtx(),
+      model: pinnedModel()
+    };
+  }
+
+  function paintSubStatus() {
+    var el = $('subStatus');
+    if (!el || !Sub) return;
+    var view = Sub.subscriptionPublicView(subRec());
+    el.textContent = view.active
+      ? (view.label + ' — Agent host is gated. Inference still pays via x402.')
+      : 'No key — Agent stays closed. Chat still pays via x402.';
+  }
+
+  async function ingestSubPaste() {
+    if (!Sub) return;
+    var raw = ($('subKey') && $('subKey').value) || '';
+    var parsed = Sub.parseSubscriptionPaste(raw);
+    if (parsed.error) {
+      toast(parsed.error === 'empty' ? 'paste a key' : parsed.error);
+      return;
+    }
+    if (parsed.session) {
+      setBanner('checking subscription…');
+      try {
+        var body = await Sub.fetchBillingKey(parsed.session);
+        var ingested = Sub.ingestBillingKeyResponse(body, { session: parsed.session });
+        if (ingested.pending) {
+          setBanner('That checkout is still confirming.');
+          return;
+        }
+        if (!ingested.ok) {
+          setBanner(ingested.error || 'no key yet');
+          return;
+        }
+      } catch (e) {
+        setBanner(e.message || 'could not fetch billing key');
+        return;
+      }
+    } else {
+      Sub.saveSubscription({ key: parsed.key });
+    }
+    if ($('subKey')) $('subKey').value = '';
+    paintSubStatus();
+    setBanner('Subscription key saved. Agent host is gated; x402 still pays inference.');
+    toast('key saved');
+    renderHeader();
+  }
+
+  function clearSubKey() {
+    if (Sub) Sub.clearSubscription();
+    var t = active();
+    if (t) {
+      t.occSessionId = null;
+      t.occCwd = null;
+    }
+    saveStore();
+    paintSubStatus();
+    setBanner('Subscription key removed. Agent stays closed until you paste one.');
+    renderHeader();
+  }
+
+  async function ensureOccSession(thread) {
+    if (!Occ) throw new Error('hosted OCC client missing');
+    if (!hasAgentKey()) {
+      var err = new Error('No subscription key — Agent needs an OpenZoo subscription Bearer.');
+      err.code = 'occ-no-key';
+      throw err;
+    }
+    if (thread.occSessionId) return { id: thread.occSessionId, cwd: thread.occCwd || Occ.DEFAULT_CWD };
+    setBanner('opening Agent session…');
+    var sess = await Occ.createSession(Object.assign(occCtx(), {
+      threadId: thread.id,
+      name: thread.name
+    }));
+    thread.occSessionId = sess.id;
+    thread.occCwd = sess.cwd;
+    saveStore();
+    return sess;
+  }
+
   window.addEventListener('message', function (event) {
     if (event.source !== window.parent) return;
     var data = event.data;
@@ -438,6 +548,30 @@
     raceSel.className = 'dial' + (racing ? ' hot' : '');
     tierSel.title = 'How much to spend per turn when racing';
     raceSel.title = 'Ask N models from the tier at once. First X countable back are judged. You pay for every entrant.';
+    var modeSel = $('modeSel');
+    if (modeSel) {
+      modeSel.value = runMode(t);
+      modeSel.className = 'dial' + (isAgent(t) ? ' hot' : '');
+    }
+    var tip = $('goalTip');
+    if (tip) {
+      tip.classList.toggle('show', isAgent(t) && !t.goalSet);
+    }
+    var inp = $('inp');
+    if (inp) {
+      inp.placeholder = isAgent(t) ? 'Message or /goal …' : 'Message';
+    }
+    if (isAgent(t)) {
+      raceSel.disabled = true;
+      raceSel.className = 'dial pinned';
+      raceSel.title = 'Agent is one hosted OCC session — race stays on Chat.';
+      if (modelSel) {
+        modelSel.disabled = false;
+        modelSel.className = 'dial';
+      }
+    } else {
+      raceSel.disabled = false;
+    }
   }
 
   function renderHud() {
@@ -466,7 +600,7 @@
     if (!t.messages.length) {
       var welcome = document.createElement('div');
       welcome.className = 'row bot';
-      welcome.innerHTML = '<div class="bubble">Threads, chat, and your wallet — same product as the desktop client. Attach files, a folder, or notes; the app keeps them with this thread. Pay from the connected wallet.</div>';
+      welcome.innerHTML = '<div class="bubble">Chat is completions from your wallet (x402 + MWA). Agent is hosted OCC + upload — phones cannot run packed openzoo-claude. Agent needs a subscription Bearer; no key means no session. Never ANTHROPIC_API_KEY.</div>';
       log.appendChild(welcome);
       return;
     }
@@ -568,7 +702,7 @@
       var f = files[i];
       var path = f.webkitRelativePath || f.name;
       var content = (looksText(f) && f.size < 400000) ? await readFileAsText(f) : null;
-      pendingFiles.push({ name: path, size: f.size, content: content });
+      pendingFiles.push({ name: path, size: f.size, content: content, file: f });
     }
     renderAttach();
     updateSend();
@@ -870,15 +1004,71 @@
     };
   }
 
+  async function submitAgent(thread, text, files) {
+    if (!hasAgentKey()) {
+      setBanner('No subscription key — Agent needs an OpenZoo subscription Bearer. Paste one in wallet.');
+      openWallet();
+      return false;
+    }
+    if (!wallet.address) {
+      setBanner('Connect a wallet — x402 still pays Agent inference.');
+      return false;
+    }
+    var sess;
+    try {
+      sess = await ensureOccSession(thread);
+    } catch (e) {
+      if (e && (e.code === 'occ-no-key' || e.code === 'occ-unauthorized')) {
+        thread.occSessionId = null;
+        setBanner(e.message);
+        openWallet();
+        return false;
+      }
+      throw e;
+    }
+    if (files && files.length) {
+      setBanner('uploading to Agent cwd…');
+      await Occ.uploadFiles(sess.id, files, occCtx());
+      setBanner('');
+    }
+    if (!text && !(files && files.length)) return true;
+    var line = text;
+    if (!line && files && files.length) {
+      line = 'uploaded ' + files.map(function (f) { return f.name; }).join(', ') + ' to session cwd';
+    }
+    var turn = await Occ.sendMessage(sess.id, line, Object.assign(occCtx(), {
+      onDelta: function (piece, extra) {
+        ingestAssistant(thread, piece, extra || {}, { replace: !!(extra && extra.replace), pending: true });
+      }
+    }));
+    if (Occ.isGoalText(line)) thread.goalSet = true;
+    var content = turn.text || '';
+    var last = thread.messages[thread.messages.length - 1];
+    if (last && last.role === 'assistant') {
+      last.content = content || last.content || (Occ.isGoalText(line) ? 'goal set' : '…');
+      last.pending = false;
+      last.meta = 'Agent · hosted OCC';
+    }
+    thread.preview = (last && last.content || content).slice(0, 80);
+    saveStore();
+    return true;
+  }
+
   async function submit() {
     var text = $('inp').value.trim();
     if ((!text && !pendingFiles.length) || state.busy) return;
-    if (!wallet.address) {
+    var t = active();
+    if (!isAgent(t) && !wallet.address) {
       setBanner('Connect a wallet on the shell first — chat is paid from your wallet.');
       return;
     }
-    var t = active();
+    if (isAgent(t) && !hasAgentKey()) {
+      setBanner('No subscription key — Agent needs an OpenZoo subscription Bearer. Paste one in wallet.');
+      openWallet();
+      return;
+    }
     var corpus = corpusFromPending();
+    var agentFiles = pendingFiles.slice();
     pendingFiles = [];
     $('inp').value = '';
     renderAttach();
@@ -892,6 +1082,20 @@
     state.busy = true;
     render();
     try {
+      if (isAgent(t)) {
+        var ok = await submitAgent(t, text, agentFiles);
+        if (!ok) {
+          t.messages.pop();
+          saveStore();
+          state.busy = false;
+          render();
+          return;
+        }
+        setBanner('');
+        state.busy = false;
+        render();
+        return;
+      }
       if (corpus) await attachQuietly(t, corpus);
       var history = completedHistory(t);
       var spend = spendOf(t);
@@ -994,6 +1198,16 @@
         render();
         return;
       }
+      if (e && (e.code === 'occ-no-key' || e.code === 'occ-unauthorized')) {
+        t.messages.pop();
+        t.occSessionId = null;
+        saveStore();
+        state.busy = false;
+        render();
+        setBanner(e.message);
+        openWallet();
+        return;
+      }
       if (isFundPrompt(e)) {
         t.messages.pop();
         saveStore();
@@ -1044,6 +1258,7 @@
     } catch (e) {
       body.textContent = OpenZooPay.humanizeError(e.message || e);
     }
+    paintSubStatus();
   }
 
   async function topUpNow() {
@@ -1077,7 +1292,22 @@
     if (e.target === $('walletOverlay')) $('walletOverlay').classList.remove('show');
   });
   $('topUpBtn').onclick = topUpNow;
+  if ($('subSave')) $('subSave').onclick = ingestSubPaste;
+  if ($('subClear')) $('subClear').onclick = clearSubKey;
   $('leaveBtn').onclick = function () { parent.postMessage({ type: 'wallet-exit' }, '*'); };
+  if ($('modeSel')) {
+    $('modeSel').onchange = function () {
+      var t = active();
+      t.mode = $('modeSel').value === 'agent' ? 'agent' : 'chat';
+      if (t.mode === 'agent' && !hasAgentKey()) {
+        setBanner('No subscription key — Agent needs an OpenZoo subscription Bearer. Paste one in wallet.');
+        openWallet();
+      }
+      saveStore();
+      setDials();
+      renderLog();
+    };
+  }
   $('plusBtn').onclick = function (e) {
     e.stopPropagation();
     $('plusMenu').classList.toggle('show');
@@ -1146,6 +1376,7 @@
   // Chrome is painted. Do not wait on fly.dev /v1/models — dismiss the
   // shell's #oz-boot overlay now, then fetch the catalog in the background.
   try { parent.postMessage({ type: 'openzoo-chrome-ready' }, '*'); } catch (_) {}
+  paintSubStatus();
   loadModels();
 
   document.addEventListener('visibilitychange', function () {
