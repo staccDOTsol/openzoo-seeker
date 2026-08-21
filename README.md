@@ -20,7 +20,46 @@ This repository is a fork of [FreeSolDev/CordovaSeeker](https://github.com/FreeS
 └────────────────────────────────────────────┘
 ```
 
-The shell owns the wallet. The UI never sees a key. There is no local `:8402` sidecar and no iframe of `openzoo.fun`.
+The shell owns the wallet. The UI never sees a key. There is no local `:8402` sidecar and no iframe of `openzoo.fun`. Chat stays on the bundled UI. **Agent** is hosted OCC + upload on the same product origin as this app's MWA identity (`https://openzoo.fun`) — phones cannot run packed `openzoo-claude`.
+
+## Agent (hosted OCC)
+
+Phones cannot pack a PTY. Agent is a remote OCC session on the openzoo.fun door, plus file upload into that session's cwd. Host access is gated:
+
+```
+Authorization: Bearer <subscription key>
+```
+
+No key → no Agent session. The dummy gateway string `Bearer openzoo-seeker` is **not** a subscription key. Never `ANTHROPIC_API_KEY`. x402 + MWA still pays inference; the OCC host is not a public unauthenticated PTY.
+
+Paste the key (or a `https://zoo.openzoo.fun/billing/done?session=…` URL) in the wallet sheet. Chat keeps working without it.
+
+### Door routes (openzoo.fun / staccDOTsol/openzoo)
+
+Same origin as MWA identity. Billing key exchange stays on `zoo.openzoo.fun`.
+
+| method | path | auth | what |
+|---|---|---|---|
+| `POST` | `/api/occ/sessions` | subscription Bearer | open an Agent session (`{ id, cwd }`). No key → 401, no session |
+| `GET` | `/api/occ/sessions/:id` | subscription Bearer | session status |
+| `POST` | `/api/occ/sessions/:id/messages` | subscription Bearer; 402 → x402/MWA | Message. Streams SSE `data:` events |
+| `POST` | `/api/occ/sessions/:id/goal` | subscription Bearer; 402 → x402/MWA | `/goal <job>` (one slash) |
+| `PUT` | `/api/occ/sessions/:id/files?path=` | subscription Bearer | upload bytes into session cwd |
+| `GET` | `/api/occ/sessions/:id/stream` | subscription Bearer | live output |
+| `POST` | `/api/occ/sessions/:id/stop` | subscription Bearer | interrupt |
+| `GET` | `https://zoo.openzoo.fun/api/billing/tiers` | none | live plans |
+| `GET` | `https://zoo.openzoo.fun/api/billing/key?session=` | none | poll checkout → key |
+
+Existing Chat / pay path is unchanged:
+
+| method | origin | what |
+|---|---|---|
+| `GET` | `https://x402-tokens.fly.dev/v1/models` | catalog |
+| `POST` | `https://x402-tokens.fly.dev/v1/chat/completions` | Chat + race (x402 + MWA) |
+| `POST` | `https://x402-tokens.fly.dev/v1/hrr/bind` | Chat attach / spill |
+| `POST` | `https://x402-tokens.fly.dev/v1/pay/build` | unsigned payment tx |
+
+Agent attach uploads to OCC cwd. Chat attach still binds/spills. Race stays on Chat.
 
 Attach is abstract: you drop files, a folder, or notes. The app keeps a corpus with that thread behind the scenes. Chat uses the same Claude / `npx openzoo claude` spill path: a context id per thread, older turns bound once, later calls send a short tail plus that id. Completions never pair `x-hrr-context` with the growing messages array. The screen never shows context ids, bind routes, or wrap-twin homework. HUD savings is `directUsd / spentUsd`, not a running sum of `savesVsDirect`.
 

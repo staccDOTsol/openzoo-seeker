@@ -30,6 +30,8 @@ const live402 = [row(Y, 7018, 'yUSDCx')];
 const REQUIRED_CONNECT = [
   'https://x402-tokens.fly.dev',
   'https://x402.accrue.fund',
+  'https://openzoo.fun',
+  'https://zoo.openzoo.fun',
   'https://api.mainnet-beta.solana.com',
   'https://solana-rpc.publicnode.com'
 ];
