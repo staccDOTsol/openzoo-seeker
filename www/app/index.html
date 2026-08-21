@@ -2,9 +2,9 @@
 <html lang="en" data-page="openzoo-grokui">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta http-equiv="Content-Security-Policy"
-  content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://x402-tokens.fly.dev https://x402.accrue.fund https://openzoo.fun https://zoo.openzoo.fun https://api.mainnet-beta.solana.com https://solana-rpc.publicnode.com; img-src * data:; style-src 'self' 'unsafe-inline';">
+  content="default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://x402-tokens.fly.dev https://x402.accrue.fund https://openzoo.fun https://zoo.openzoo.fun https://api.mainnet-beta.solana.com https://solana-rpc.publicnode.com; img-src * data:; style-src 'self' 'unsafe-inline'; frame-src 'self' https:;">
 <title>openzoo</title>
 <style>
   :root { color-scheme: dark; }
@@ -42,8 +42,22 @@
   .dial.hot { color: #b8f240; border-color: #b8f240; }
   .dial:disabled, .dial.pinned { opacity: .45; cursor: default; }
   #hudChip { cursor: default; pointer-events: none; max-width: 200px; white-space: nowrap; }
-  #goalTip { display: none; padding: 6px 16px 0; font-size: 11px; color: #8e8e93; }
-  #goalTip.show { display: block; }
+  #agentPane { display: none; flex: 1 1 auto; min-width: 0; min-height: 0; position: relative;
+               background: #000; overflow: hidden; }
+  body.agent-ide #agentPane { display: block; }
+  body.agent-ide #log,
+  body.agent-ide #bar,
+  body.agent-ide #plusMenu { display: none !important; }
+  body.agent-ide #tierSel,
+  body.agent-ide #raceSel,
+  body.agent-ide #model,
+  body.agent-ide #hudChip { display: none; }
+  #agentFrame { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none;
+                border: 0; display: block; background: #000; }
+  #agentNeedKey { display: none; position: absolute; inset: 0; align-items: center; justify-content: center;
+                  padding: 24px; color: #8e8e93; text-align: center; background: #000; }
+  body.agent-ide.ide-need-key #agentNeedKey { display: flex; }
+  body.agent-ide.ide-need-key #agentFrame { display: none; }
   .subrow { border: 1px solid #1c1c1e; border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; }
   #subKey { width: 100%; background: #1c1c1e; border: 1px solid #2c2c2e; color: #ececec;
             border-radius: 10px; padding: 8px 10px; font: inherit; margin-top: 8px; }
@@ -135,6 +149,22 @@
     #menuBtn { display: flex; }
     #scrim.show { display: block; }
     .row { max-width: 94%; }
+    body.agent-ide {
+      padding: env(safe-area-inset-top) 0 0;
+      height: 100dvh; height: 100svh;
+      overflow: hidden;
+    }
+    body.agent-ide #main { min-height: 0; overflow: hidden; }
+    body.agent-ide #chatHeader {
+      padding: 8px 10px calc(8px);
+      padding-left: max(10px, env(safe-area-inset-left));
+      padding-right: max(10px, env(safe-area-inset-right));
+    }
+    body.agent-ide #agentPane { flex: 1 1 auto; }
+    body.agent-ide #agentFrame {
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      max-width: none; max-height: none; object-fit: unset;
+    }
   }
 </style>
 </head>
@@ -156,8 +186,8 @@
       <div class="wsub">This is the Seeker / Phantom wallet you connected with Mobile Wallet Adapter — <b>your</b> wallet, not a local burner key. Each call is paid from it. Keys never leave the wallet app. Tap the address to copy.</div>
       <div id="walletBody">loading…</div>
       <div class="subrow" data-component="subscription-lane">
-        <div class="wlab">Agent host · subscription Bearer</div>
-        <div class="wsub" id="subStatus" style="margin:6px 0 0">No key — Agent stays closed. Chat still pays via x402.</div>
+        <div class="wlab">Agent IDE · subscription Bearer</div>
+        <div class="wsub" id="subStatus" style="margin:6px 0 0">No key — Agent IDE stays closed. Chat still pays via x402.</div>
         <input id="subKey" type="password" autocomplete="off" spellcheck="false"
                placeholder="paste key or zoo.openzoo.fun/billing/done?session=…"
                data-component="subscription-paste">
@@ -238,7 +268,7 @@
         <select class="dial" id="model" data-component="model-picker" aria-label="Model"
                 title="Auto lets the sidecar pick. Pin a real model to lock one."></select>
         <select class="dial" id="modeSel" data-component="run-mode" aria-label="Chat or Agent"
-                title="Chat is completions + x402. Agent is hosted OCC + upload (needs a subscription Bearer).">
+                title="Chat is completions + x402. Agent is cloud code-server + Cline (subscription Bearer on /api/ide/session).">
           <option value="chat">Chat</option>
           <option value="agent">Agent</option>
         </select>
@@ -247,8 +277,11 @@
       </div>
     </div>
     <div id="banner" data-component="status-banner"></div>
-    <div id="goalTip" data-component="goal-tip">Pro tip: /goal &lt;job&gt; — one slash. Agent keeps working until it's done.</div>
     <div id="log" data-component="chat-log"></div>
+    <div id="agentPane" data-component="agent-ide" hidden>
+      <div id="agentNeedKey">Paste an OpenZoo subscription key in wallet to open Agent IDE. Chat still pays via x402.</div>
+      <iframe id="agentFrame" title="Agent IDE" allow="clipboard-read; clipboard-write"></iframe>
+    </div>
     <div id="bar">
       <div id="plusMenu" data-component="attach-menu">
         <div class="pop-item" id="attachFiles">Attach files</div>
@@ -282,7 +315,7 @@
   <script src="auto.js"></script>
   <script src="think.js"></script>
   <script src="subscription.js"></script>
-  <script src="occ.js"></script>
+  <script src="ide.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

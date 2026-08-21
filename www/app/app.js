@@ -1,9 +1,11 @@
-/* grokui-on-a-phone: threads + chat + wallet + hosted OCC Agent.
+/* grokui-on-a-phone: threads + chat + wallet + cloud Agent IDE.
    Chat: attach binds files; later turns spill a short tail + context id —
-   never the growing thread together with x-hrr-context.
-   Agent: hosted OCC + upload to session cwd (phones cannot run packed
-   openzoo-claude). Host gate is a subscription Bearer. x402/MWA still pays
-   inference. Never ANTHROPIC_API_KEY. */
+   never the growing thread together with x-hrr-context. Pay path is
+   x402-tokens.fly.dev + MWA.
+   Agent: cloud code-server + Cline from POST/GET /api/ide/session on
+   zoo.openzoo.fun. Host gate is a subscription Bearer, not a wallet token.
+   Load the minted { url } in the Agent webview. Never ANTHROPIC_API_KEY.
+   Never an open / hardcoded IDE URL. */
 (function () {
   'use strict';
 
@@ -22,7 +24,7 @@
   var AUTO_MODEL = (Auto && Auto.AUTO_MODEL) || 'openzoo/auto';
   var Think = window.OpenZooThink;
   var Sub = window.OpenZooSub;
-  var Occ = window.OpenZooOcc;
+  var Ide = window.OpenZooIde;
 
   function $(id) { return document.getElementById(id); }
 
@@ -96,9 +98,7 @@
       spillCorpus: '',
       preview: '',
       mode: 'chat',
-      occSessionId: null,
-      occCwd: null,
-      goalSet: false,
+      ideSessionId: null,
       tier: spend.tier,
       race: spend.race,
       raceNeed: spend.raceNeed
@@ -308,22 +308,13 @@
     return !!(Sub && Sub.hasSubscriptionKey(subRec()));
   }
 
-  function occCtx() {
-    return {
-      subscription: subRec(),
-      paidFetch: window.OpenZooPay && OpenZooPay.paidFetch,
-      payCtx: payCtx(),
-      model: pinnedModel()
-    };
-  }
-
   function paintSubStatus() {
     var el = $('subStatus');
     if (!el || !Sub) return;
     var view = Sub.subscriptionPublicView(subRec());
     el.textContent = view.active
-      ? (view.label + ' — Agent host is gated. Inference still pays via x402.')
-      : 'No key — Agent stays closed. Chat still pays via x402.';
+      ? (view.label + ' — Agent IDE uses this Bearer. Chat still pays via x402.')
+      : 'No key — Agent IDE stays closed. Chat still pays via x402.';
   }
 
   async function ingestSubPaste() {
@@ -356,7 +347,10 @@
     }
     if ($('subKey')) $('subKey').value = '';
     paintSubStatus();
-    setBanner('Subscription key saved. Agent host is gated; x402 still pays inference.');
+    setBanner('Subscription key saved. Agent IDE uses the Bearer; Chat still pays via x402.');
+    if (isAgent(active())) {
+      openAgentIde(active()).catch(function (e) { handleIdeError(active(), e); });
+    }
     toast('key saved');
     renderHeader();
   }
@@ -364,33 +358,83 @@
   function clearSubKey() {
     if (Sub) Sub.clearSubscription();
     var t = active();
-    if (t) {
-      t.occSessionId = null;
-      t.occCwd = null;
-    }
+    if (t) t.ideSessionId = null;
+    unloadIdeFrame();
     saveStore();
     paintSubStatus();
-    setBanner('Subscription key removed. Agent stays closed until you paste one.');
+    setBanner('Subscription key removed. Agent IDE stays closed until you paste one.');
     renderHeader();
+    setAgentChrome();
   }
 
-  async function ensureOccSession(thread) {
-    if (!Occ) throw new Error('hosted OCC client missing');
-    if (!hasAgentKey()) {
-      var err = new Error('No subscription key — Agent needs an OpenZoo subscription Bearer.');
-      err.code = 'occ-no-key';
-      throw err;
+  function ideCtx() {
+    return { subscription: subRec() };
+  }
+
+  function unloadIdeFrame() {
+    var frame = $('agentFrame');
+    if (!frame) return;
+    frame.removeAttribute('data-src');
+    frame.removeAttribute('src');
+  }
+
+  function loadIdeFrame(sess) {
+    var frame = $('agentFrame');
+    if (!frame || !Ide) return;
+    var src = Ide.frameSrc(sess);
+    if (frame.getAttribute('data-src') === src) return;
+    frame.setAttribute('data-src', src);
+    frame.src = src;
+  }
+
+  function setAgentChrome() {
+    var on = isAgent(active());
+    document.body.classList.toggle('agent-ide', on);
+    document.body.classList.toggle('ide-need-key', on && !hasAgentKey());
+    var pane = $('agentPane');
+    if (pane) pane.hidden = !on;
+    var bar = $('bar');
+    if (bar) bar.hidden = on;
+  }
+
+  function handleIdeError(thread, e) {
+    if (thread) thread.ideSessionId = null;
+    unloadIdeFrame();
+    saveStore();
+    setAgentChrome();
+    var code = e && e.code;
+    if (code === 'ide-no-key' || code === 'ide-unauthorized') {
+      setBanner(e.message || 'No subscription key — Agent IDE needs an OpenZoo subscription Bearer.');
+      openWallet();
+      return;
     }
-    if (thread.occSessionId) return { id: thread.occSessionId, cwd: thread.occCwd || Occ.DEFAULT_CWD };
-    setBanner('opening Agent session…');
-    var sess = await Occ.createSession(Object.assign(occCtx(), {
+    setBanner((e && e.message) || 'Agent IDE could not open.');
+  }
+
+  async function openAgentIde(thread) {
+    setAgentChrome();
+    if (!isAgent(thread)) return false;
+    if (!hasAgentKey()) {
+      unloadIdeFrame();
+      setBanner('No subscription key — Agent IDE needs an OpenZoo subscription Bearer. Paste one in wallet.');
+      openWallet();
+      return false;
+    }
+    if (!Ide) {
+      setBanner('Agent IDE client missing.');
+      return false;
+    }
+    setBanner('opening Agent IDE…');
+    var sess = await Ide.ensureSession(Object.assign(ideCtx(), {
       threadId: thread.id,
       name: thread.name
     }));
-    thread.occSessionId = sess.id;
-    thread.occCwd = sess.cwd;
+    thread.ideSessionId = sess.id || null;
     saveStore();
-    return sess;
+    loadIdeFrame(sess);
+    setBanner('');
+    setAgentChrome();
+    return true;
   }
 
   window.addEventListener('message', function (event) {
@@ -553,25 +597,25 @@
       modeSel.value = runMode(t);
       modeSel.className = 'dial' + (isAgent(t) ? ' hot' : '');
     }
-    var tip = $('goalTip');
-    if (tip) {
-      tip.classList.toggle('show', isAgent(t) && !t.goalSet);
-    }
     var inp = $('inp');
-    if (inp) {
-      inp.placeholder = isAgent(t) ? 'Message or /goal …' : 'Message';
-    }
+    if (inp) inp.placeholder = 'Message';
     if (isAgent(t)) {
       raceSel.disabled = true;
       raceSel.className = 'dial pinned';
-      raceSel.title = 'Agent is one hosted OCC session — race stays on Chat.';
+      raceSel.title = 'Agent is cloud code-server + Cline — race stays on Chat.';
+      if (tierSel) {
+        tierSel.disabled = true;
+        tierSel.className = 'dial pinned';
+      }
       if (modelSel) {
-        modelSel.disabled = false;
-        modelSel.className = 'dial';
+        modelSel.disabled = true;
+        modelSel.className = 'dial pinned';
       }
     } else {
       raceSel.disabled = false;
+      if (tierSel) tierSel.disabled = false;
     }
+    setAgentChrome();
   }
 
   function renderHud() {
@@ -600,7 +644,7 @@
     if (!t.messages.length) {
       var welcome = document.createElement('div');
       welcome.className = 'row bot';
-      welcome.innerHTML = '<div class="bubble">Chat is completions from your wallet (x402 + MWA). Agent is hosted OCC + upload — phones cannot run packed openzoo-claude. Agent needs a subscription Bearer; no key means no session. Never ANTHROPIC_API_KEY.</div>';
+      welcome.innerHTML = '<div class="bubble">Chat is completions from your wallet (x402 + MWA). Agent is cloud code-server + Cline — POST/GET /api/ide/session with a subscription Bearer, then the minted URL loads in the Agent webview. No key means no IDE. Never ANTHROPIC_API_KEY. Never an open URL.</div>';
       log.appendChild(welcome);
       return;
     }
@@ -671,6 +715,11 @@
     renderLog();
     renderAttach();
     updateSend();
+    setAgentChrome();
+    var frame = $('agentFrame');
+    if (isAgent(active()) && hasAgentKey() && frame && !frame.getAttribute('data-src')) {
+      openAgentIde(active()).catch(function (e) { handleIdeError(active(), e); });
+    }
   }
 
   function updateSend() {
@@ -1004,71 +1053,23 @@
     };
   }
 
-  async function submitAgent(thread, text, files) {
-    if (!hasAgentKey()) {
-      setBanner('No subscription key — Agent needs an OpenZoo subscription Bearer. Paste one in wallet.');
-      openWallet();
-      return false;
-    }
-    if (!wallet.address) {
-      setBanner('Connect a wallet — x402 still pays Agent inference.');
-      return false;
-    }
-    var sess;
-    try {
-      sess = await ensureOccSession(thread);
-    } catch (e) {
-      if (e && (e.code === 'occ-no-key' || e.code === 'occ-unauthorized')) {
-        thread.occSessionId = null;
-        setBanner(e.message);
-        openWallet();
-        return false;
-      }
-      throw e;
-    }
-    if (files && files.length) {
-      setBanner('uploading to Agent cwd…');
-      await Occ.uploadFiles(sess.id, files, occCtx());
-      setBanner('');
-    }
-    if (!text && !(files && files.length)) return true;
-    var line = text;
-    if (!line && files && files.length) {
-      line = 'uploaded ' + files.map(function (f) { return f.name; }).join(', ') + ' to session cwd';
-    }
-    var turn = await Occ.sendMessage(sess.id, line, Object.assign(occCtx(), {
-      onDelta: function (piece, extra) {
-        ingestAssistant(thread, piece, extra || {}, { replace: !!(extra && extra.replace), pending: true });
-      }
-    }));
-    if (Occ.isGoalText(line)) thread.goalSet = true;
-    var content = turn.text || '';
-    var last = thread.messages[thread.messages.length - 1];
-    if (last && last.role === 'assistant') {
-      last.content = content || last.content || (Occ.isGoalText(line) ? 'goal set' : '…');
-      last.pending = false;
-      last.meta = 'Agent · hosted OCC';
-    }
-    thread.preview = (last && last.content || content).slice(0, 80);
-    saveStore();
-    return true;
-  }
-
   async function submit() {
     var text = $('inp').value.trim();
     if ((!text && !pendingFiles.length) || state.busy) return;
     var t = active();
-    if (!isAgent(t) && !wallet.address) {
+    if (isAgent(t)) {
+      try {
+        await openAgentIde(t);
+      } catch (e) {
+        handleIdeError(t, e);
+      }
+      return;
+    }
+    if (!wallet.address) {
       setBanner('Connect a wallet on the shell first — chat is paid from your wallet.');
       return;
     }
-    if (isAgent(t) && !hasAgentKey()) {
-      setBanner('No subscription key — Agent needs an OpenZoo subscription Bearer. Paste one in wallet.');
-      openWallet();
-      return;
-    }
     var corpus = corpusFromPending();
-    var agentFiles = pendingFiles.slice();
     pendingFiles = [];
     $('inp').value = '';
     renderAttach();
@@ -1082,20 +1083,6 @@
     state.busy = true;
     render();
     try {
-      if (isAgent(t)) {
-        var ok = await submitAgent(t, text, agentFiles);
-        if (!ok) {
-          t.messages.pop();
-          saveStore();
-          state.busy = false;
-          render();
-          return;
-        }
-        setBanner('');
-        state.busy = false;
-        render();
-        return;
-      }
       if (corpus) await attachQuietly(t, corpus);
       var history = completedHistory(t);
       var spend = spendOf(t);
@@ -1198,14 +1185,12 @@
         render();
         return;
       }
-      if (e && (e.code === 'occ-no-key' || e.code === 'occ-unauthorized')) {
+      if (e && (e.code === 'ide-no-key' || e.code === 'ide-unauthorized' || e.code === 'ide-no-url' || e.code === 'ide-open-url')) {
+        handleIdeError(t, e);
         t.messages.pop();
-        t.occSessionId = null;
         saveStore();
         state.busy = false;
         render();
-        setBanner(e.message);
-        openWallet();
         return;
       }
       if (isFundPrompt(e)) {
@@ -1295,17 +1280,19 @@
   if ($('subSave')) $('subSave').onclick = ingestSubPaste;
   if ($('subClear')) $('subClear').onclick = clearSubKey;
   $('leaveBtn').onclick = function () { parent.postMessage({ type: 'wallet-exit' }, '*'); };
-  if ($('modeSel')) {
+    if ($('modeSel')) {
     $('modeSel').onchange = function () {
       var t = active();
       t.mode = $('modeSel').value === 'agent' ? 'agent' : 'chat';
-      if (t.mode === 'agent' && !hasAgentKey()) {
-        setBanner('No subscription key — Agent needs an OpenZoo subscription Bearer. Paste one in wallet.');
-        openWallet();
-      }
       saveStore();
       setDials();
       renderLog();
+      if (t.mode === 'agent') {
+        openAgentIde(t).catch(function (e) { handleIdeError(t, e); });
+      } else {
+        setBanner('');
+        setAgentChrome();
+      }
     };
   }
   $('plusBtn').onclick = function (e) {
