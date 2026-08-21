@@ -1,5 +1,6 @@
-/* OpenZoo subscription key — the host gate for Agent (hosted OCC).
-   Wallet/x402 still pays inference. This is never ANTHROPIC_API_KEY.
+/* OpenZoo subscription key — the host gate for Agent IDE (code-server + Cline).
+   Chat still pays via x402 + MWA. This is never ANTHROPIC_API_KEY.
+   Agent IDE uses this Bearer on /ide/session, not a wallet token.
    Paste the bearer itself or the zoo.openzoo.fun /billing/done?session= URL. */
 (function (root) {
   'use strict';
@@ -86,7 +87,7 @@
       active: true,
       tier: sub.tier || null,
       tierName: name || null,
-      label: name ? (name + ' · Agent host') : 'Subscription key · Agent host'
+      label: name ? (name + ' · Agent IDE') : 'Subscription key · Agent IDE'
     };
   }
 
