@@ -109,26 +109,27 @@ async function run() {
     sub.setMemoryStore(null);
   });
 
-  await check('Agent IDE door is zoo.openzoo.fun /ide/session', () => {
+  await check('Agent IDE door is zoo.openzoo.fun /api/ide/session', () => {
     assert.strictEqual(ide.IDE_ORIGIN, 'https://zoo.openzoo.fun');
-    assert.strictEqual(ide.ROUTES.session, '/ide/session');
-    assert.strictEqual(ide.SESSION_PATH, '/ide/session');
-    assert.strictEqual(ide.ideUrl(ide.ROUTES.session), 'https://zoo.openzoo.fun/ide/session');
+    assert.strictEqual(ide.ROUTES.session, '/api/ide/session');
+    assert.strictEqual(ide.SESSION_PATH, '/api/ide/session');
+    assert.strictEqual(ide.ideUrl(ide.ROUTES.session), 'https://zoo.openzoo.fun/api/ide/session');
     assert.strictEqual(ide.ROUTES.sessions, undefined);
     assert.strictEqual(ide.ROUTES.messages, undefined);
     const src = read('www/app/ide.js');
-    assert.doesNotMatch(src, /['"`]\/api\/ide/);
+    assert.match(src, /['"`]\/api\/ide\/session['"`]/);
+    assert.doesNotMatch(src, /['"`]\/ide\/session['"`]/);
     assert.doesNotMatch(src, /['"`]\/occ\//);
     assert.match(src, /Never ANTHROPIC_API_KEY|never ANTHROPIC_API_KEY/);
   });
 
-  await check('POST/GET /ide/session send subscription Bearer only', async () => {
+  await check('POST/GET /api/ide/session send subscription Bearer only', async () => {
     sub.setMemoryStore(memStore());
     sub.saveSubscription({ key: 'oz_live_key_abc', tier: 'basic' });
     const calls = [];
     const fetchFn = async (url, init) => {
       calls.push({ url: url, method: (init && init.method) || 'GET', headers: init && init.headers, body: init && init.body });
-      if (/\/ide\/session$/.test(url)) return jsonRes(200, SESSION);
+      if (/\/api\/ide\/session$/.test(url)) return jsonRes(200, SESSION);
       return jsonRes(404, { error: 'not found' });
     };
     const ctx = { subscription: sub.loadSubscription(), fetch: fetchFn };
@@ -149,7 +150,7 @@ async function run() {
       assert.ok(!c.headers['x-api-key']);
       assert.ok(!c.headers['x-payment']);
       assert.ok(!c.headers['X-PAYMENT']);
-      assert.strictEqual(c.url, 'https://zoo.openzoo.fun/ide/session');
+      assert.strictEqual(c.url, 'https://zoo.openzoo.fun/api/ide/session');
     });
     sub.setMemoryStore(null);
   });
@@ -218,7 +219,7 @@ async function run() {
     sub.setMemoryStore(null);
   });
 
-  await check('/ide/session never uses paidFetch (Bearer host gate, not a wallet token)', async () => {
+  await check('/api/ide/session never uses paidFetch (Bearer host gate, not a wallet token)', async () => {
     sub.setMemoryStore(memStore());
     sub.saveSubscription({ key: 'oz_live_key_host' });
     try {
@@ -270,8 +271,9 @@ async function run() {
     const shell = read('www/index.html');
     assert.match(shell, /cordova-plugin-mwa|MWA\.authorize|wallet-sign-transaction/);
     assert.match(read('www/app/ide.js'), /https:\/\/zoo\.openzoo\.fun/);
-    assert.match(read('www/app/ide.js'), /\/ide\/session/);
-    assert.doesNotMatch(read('www/app/ide.js'), /['"`]\/api\/ide|['"`]\/occ\//);
+    assert.match(read('www/app/ide.js'), /\/api\/ide\/session/);
+    assert.doesNotMatch(read('www/app/ide.js'), /['"`]\/ide\/session['"`]/);
+    assert.doesNotMatch(read('www/app/ide.js'), /['"`]\/occ\//);
     assert.match(read('www/app/subscription.js'), /zoo\.openzoo\.fun/);
     assert.match(read('www/app/app.js'), /x402-tokens\.fly\.dev/);
     assert.match(read('www/app/pay.js'), /x402-tokens\.fly\.dev/);
@@ -295,10 +297,10 @@ async function run() {
     need.forEach((host) => {
       assert.ok(cfg.indexOf(host) !== -1, 'config.xml missing ' + host);
     });
-    assert.match(cfg, /\/ide\/session/);
+    assert.match(cfg, /\/api\/ide\/session/);
   });
 
-  await check('Agent chrome is wired: mode dial, /ide/session webview, subscription paste', () => {
+  await check('Agent chrome is wired: mode dial, /api/ide/session webview, subscription paste', () => {
     const html = read('www/app/index.html');
     const app = read('www/app/app.js');
     assert.match(html, /id="modeSel"/);
@@ -323,7 +325,7 @@ async function run() {
     assert.match(app, /modeSel|runMode|agent/);
     assert.doesNotMatch(app, /ANTHROPIC_API_KEY\s*=/);
     assert.doesNotMatch(app, /OpenZooOcc|occ\.js|\/occ\/sessions/);
-    assert.match(read('README.md'), /\/ide\/session/);
+    assert.match(read('README.md'), /\/api\/ide\/session/);
     assert.match(read('README.md'), /x402-tokens\.fly\.dev/);
     assert.match(read('README.md'), /subscription Bearer/);
     assert.doesNotMatch(read('README.md'), /`\/occ\/sessions`/);

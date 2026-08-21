@@ -3,7 +3,7 @@
    loaded in the Agent webview.
 
    Door: https://zoo.openzoo.fun
-   Paths: POST/GET /ide/session → { url, password?, id }
+   Paths: POST/GET /api/ide/session → { url, password?, id }
    Host gate: Authorization: Bearer <OpenZoo subscription key>
    No key → no session. Never an open / hardcoded IDE URL.
    Never ANTHROPIC_API_KEY. Chat pay stays x402 + MWA.
@@ -13,7 +13,7 @@
 
   var IDE_ORIGIN = 'https://zoo.openzoo.fun';
   var CLIENT = 'openzoo-seeker';
-  var SESSION_PATH = '/ide/session';
+  var SESSION_PATH = '/api/ide/session';
 
   function Sub() {
     if (typeof module !== 'undefined' && module.exports) {
@@ -110,7 +110,7 @@
   function sessionEndpoint(path) {
     var url = /^https?:\/\//i.test(path) ? path : ideUrl(path || SESSION_PATH);
     if (url !== IDE_ORIGIN + SESSION_PATH) {
-      throw IdeError('Agent IDE calls stay on POST/GET /ide/session.', { code: 'ide-bad-url' });
+      throw IdeError('Agent IDE calls stay on POST/GET /api/ide/session.', { code: 'ide-bad-url' });
     }
     return url;
   }
@@ -155,7 +155,7 @@
     var password = body.password || body.pass || '';
     if (!url) return null;
     if (!isHttpsUrl(url)) {
-      throw IdeError('Agent IDE URL must be https from /ide/session — never an open URL.', {
+      throw IdeError('Agent IDE URL must be https from /api/ide/session — never an open URL.', {
         code: 'ide-open-url'
       });
     }
@@ -230,7 +230,7 @@
       throw IdeError('No IDE session URL — never load an open URL.', { code: 'ide-no-url' });
     }
     if (!isHttpsUrl(session.url)) {
-      throw IdeError('Agent IDE URL must be https from /ide/session — never an open URL.', {
+      throw IdeError('Agent IDE URL must be https from /api/ide/session — never an open URL.', {
         code: 'ide-open-url'
       });
     }

@@ -2,7 +2,7 @@
    Chat: attach binds files; later turns spill a short tail + context id —
    never the growing thread together with x-hrr-context. Pay path is
    x402-tokens.fly.dev + MWA.
-   Agent: cloud code-server + Cline from POST/GET /ide/session on
+   Agent: cloud code-server + Cline from POST/GET /api/ide/session on
    zoo.openzoo.fun. Host gate is a subscription Bearer, not a wallet token.
    Load the minted { url } in the Agent webview. Never ANTHROPIC_API_KEY.
    Never an open / hardcoded IDE URL. */
@@ -644,7 +644,7 @@
     if (!t.messages.length) {
       var welcome = document.createElement('div');
       welcome.className = 'row bot';
-      welcome.innerHTML = '<div class="bubble">Chat is completions from your wallet (x402 + MWA). Agent is cloud code-server + Cline — POST/GET /ide/session with a subscription Bearer, then the minted URL loads in the Agent webview. No key means no IDE. Never ANTHROPIC_API_KEY. Never an open URL.</div>';
+      welcome.innerHTML = '<div class="bubble">Chat is completions from your wallet (x402 + MWA). Agent is cloud code-server + Cline — POST/GET /api/ide/session with a subscription Bearer, then the minted URL loads in the Agent webview. No key means no IDE. Never ANTHROPIC_API_KEY. Never an open URL.</div>';
       log.appendChild(welcome);
       return;
     }

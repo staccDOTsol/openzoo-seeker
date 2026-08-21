@@ -20,30 +20,30 @@ This repository is a fork of [FreeSolDev/CordovaSeeker](https://github.com/FreeS
 └────────────────────────────────────────────┘
 ```
 
-The shell owns the wallet. The UI never sees a key. There is no local `:8402` sidecar and no iframe of `openzoo.fun`. Chat stays on the bundled UI and still pays via **x402 + MWA**. **Agent** is cloud **code-server + Cline** on `https://zoo.openzoo.fun` — `POST`/`GET` `/ide/session` with the subscription Bearer, then the minted `{ url }` loads in the Agent webview. Phones cannot pack a local IDE. MWA identity stays `https://openzoo.fun`.
+The shell owns the wallet. The UI never sees a key. There is no local `:8402` sidecar and no iframe of `openzoo.fun`. Chat stays on the bundled UI and still pays via **x402 + MWA**. **Agent** is cloud **code-server + Cline** on `https://zoo.openzoo.fun` — `POST`/`GET` `/api/ide/session` with the subscription Bearer, then the minted `{ url }` loads in the Agent webview. Phones cannot pack a local IDE. MWA identity stays `https://openzoo.fun`.
 
 ## Agent (cloud code-server + Cline)
 
-Phones cannot pack an IDE. Agent is a remote code-server + Cline session. Host access is gated on `/ide/session`:
+Phones cannot pack an IDE. Agent is a remote code-server + Cline session. Host access is gated on `/api/ide/session`:
 
 ```
 Authorization: Bearer <OpenZoo subscription key>
 ```
 
-`POST` or `GET` `/ide/session` → `{ url, password?, id }`. The app loads `url` in `#agentFrame`. On a handheld that webview is **full-bleed** (`viewport-fit=cover`) and fills Agent mode — no nested desktop IDE letterbox. The Chat composer is hidden in Agent mode. No key → no session. The dummy gateway string `Bearer openzoo-seeker` is **not** a subscription key. Never `ANTHROPIC_API_KEY`. Never an open / hardcoded IDE URL. Agent IDE uses the **subscription Bearer**, not a wallet token. x402 + MWA stays the **Chat** pay path (`https://x402-tokens.fly.dev`).
+`POST` or `GET` `/api/ide/session` → `{ url, password?, id }`. The app loads `url` in `#agentFrame`. On a handheld that webview is **full-bleed** (`viewport-fit=cover`) and fills Agent mode — no nested desktop IDE letterbox. The Chat composer is hidden in Agent mode. No key → no session. The dummy gateway string `Bearer openzoo-seeker` is **not** a subscription key. Never `ANTHROPIC_API_KEY`. Never an open / hardcoded IDE URL. Agent IDE uses the **subscription Bearer**, not a wallet token. x402 + MWA stays the **Chat** pay path (`https://x402-tokens.fly.dev`).
 
 Paste the key (or a `https://zoo.openzoo.fun/billing/done?session=…` URL) in the wallet sheet. Chat keeps working without it.
 
 ### Door routes (zoo.openzoo.fun)
 
-Do not invent `/api/ide` or a second path set. Do not load a public IDE URL.
+Do not invent `/ide/session` or a second path set. The door is `/api/ide/session`. Do not load a public IDE URL.
 
 | method | path | body |
 |---|---|---|
-| `POST` | `/ide/session` | `{ threadId?, name? }` → `{ url, password?, id }` |
-| `GET` | `/ide/session` | → `{ url, password?, id }` (reuse) |
+| `POST` | `/api/ide/session` | `{ threadId?, name? }` → `{ url, password?, id }` |
+| `GET` | `/api/ide/session` | → `{ url, password?, id }` (reuse) |
 
-Every `/ide/session` call sends `Authorization: Bearer <subscription key>`.
+Every `/api/ide/session` call sends `Authorization: Bearer <subscription key>`.
 
 | method | path | auth | what |
 |---|---|---|---|

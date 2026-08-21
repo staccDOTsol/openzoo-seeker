@@ -14,12 +14,12 @@
     <access origin="https://x402-tokens.fly.dev" />
     <allow-navigation href="https://x402.accrue.fund/*" />
     <access origin="https://x402.accrue.fund" />
-    <!-- MWA identity origin. Agent IDE + billing live on zoo.openzoo.fun (/ide/session, not an open URL). -->
+    <!-- MWA identity origin. Agent IDE + billing live on zoo.openzoo.fun (/api/ide/session, not an open URL). -->
     <allow-navigation href="https://openzoo.fun/*" />
     <access origin="https://openzoo.fun" />
     <allow-navigation href="https://zoo.openzoo.fun/*" />
     <access origin="https://zoo.openzoo.fun" />
-    <!-- Minted Agent IDE URL from POST/GET /ide/session — never a hardcoded open URL. -->
+    <!-- Minted Agent IDE URL from POST/GET /api/ide/session — never a hardcoded open URL. -->
     <allow-navigation href="https://*/*" />
     <allow-navigation href="https://api.mainnet-beta.solana.com/*" />
     <access origin="https://api.mainnet-beta.solana.com" />
